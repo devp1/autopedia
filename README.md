@@ -121,12 +121,11 @@ Compatible with [Obsidian](https://obsidian.md/) — open `.autopedia/wiki/` as 
 
 ## Dependencies
 
-7 runtime dependencies. No LLM SDK. No database. No Express.
+6 runtime dependencies. No LLM SDK. No database. No Express.
 
 ```
 @modelcontextprotocol/sdk  — MCP protocol
 zod                        — Input validation
-gray-matter                — Markdown frontmatter
 @mozilla/readability       — Article extraction
 jsdom                      — DOM for Readability
 commander                  — CLI framework
