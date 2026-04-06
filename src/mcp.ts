@@ -58,7 +58,9 @@ export function createServer(kbRoot: string): McpServer {
       const date = new Date().toISOString().split("T")[0];
 
       if (input.url) {
-        // Fetch and extract with Readability
+        // SSRF protection: only allow http/https and reject private IPs
+        validateUrl(input.url);
+
         const response = await fetch(input.url);
         const html = await response.text();
         const dom = new JSDOM(html, { url: input.url });
@@ -75,17 +77,29 @@ export function createServer(kbRoot: string): McpServer {
         sourceContent = input.text!;
         slug = `${date}-${textToSlug(input.text!)}`;
 
-        // User text notes go to sources/user/notes/ — but we write via a
-        // different path since sources/user/ is sacred (no safeWrite)
-        const notePath = path.join(
-          kbRoot,
-          "sources",
-          "user",
-          "notes",
-          `${slug}.md`
-        );
-        fs.mkdirSync(path.dirname(notePath), { recursive: true });
-        fs.writeFileSync(notePath, sourceContent, "utf-8");
+        // Save user text notes via safe path validation
+        const notePath = path.join("sources", "user", "notes", `${slug}.md`);
+        const resolvedNote = path.resolve(kbRoot, notePath);
+        const allowedNoteDir =
+          path.join(path.resolve(kbRoot), "sources", "user", "notes") +
+          path.sep;
+
+        if (!resolvedNote.startsWith(allowedNoteDir)) {
+          throw new Error(
+            `Write rejected: note path resolves outside sources/user/notes/`
+          );
+        }
+
+        // Check for symlinks in the path
+        if (
+          fs.existsSync(resolvedNote) &&
+          fs.lstatSync(resolvedNote).isSymbolicLink()
+        ) {
+          throw new Error(`Write rejected: target is a symlink`);
+        }
+
+        fs.mkdirSync(path.dirname(resolvedNote), { recursive: true });
+        fs.writeFileSync(resolvedNote, sourceContent, "utf-8");
       }
 
       // Find relevant wiki pages by keyword matching
@@ -447,6 +461,43 @@ export function createServer(kbRoot: string): McpServer {
 }
 
 // ── Helpers ───────────────────────────────────────────────────
+
+function validateUrl(url: string): void {
+  const parsed = new URL(url);
+
+  // Only allow http and https
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`URL scheme not allowed: ${parsed.protocol}`);
+  }
+
+  // Block private/reserved IP ranges and localhost
+  const hostname = parsed.hostname.toLowerCase();
+  const blockedHosts = [
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+    "[::1]",
+    "metadata.google.internal",
+    "169.254.169.254",
+  ];
+  if (blockedHosts.includes(hostname)) {
+    throw new Error(`URL hostname blocked: ${hostname}`);
+  }
+
+  // Block private IP ranges
+  const ipMatch = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (ipMatch) {
+    const [, a, b] = ipMatch.map(Number);
+    if (
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      a === 0
+    ) {
+      throw new Error(`URL points to private IP range: ${hostname}`);
+    }
+  }
+}
 
 function urlToSlug(url: string): string {
   try {
