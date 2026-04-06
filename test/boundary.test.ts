@@ -116,6 +116,26 @@ describe("Sacred boundary enforcement", () => {
     ).toBe(false);
   });
 
+  it("rejects write when target file is itself a symlink", () => {
+    // Create a file outside wiki/ then symlink from inside wiki/ to it
+    const outsideFile = path.join(tmpDir, "outside-target.txt");
+    fs.writeFileSync(outsideFile, "original");
+
+    const symlinkFile = path.join(tmpDir, "wiki", "symlinked-file.md");
+    try {
+      fs.symlinkSync(outsideFile, symlinkFile, "file");
+    } catch {
+      return; // Symlinks not supported
+    }
+
+    expect(() =>
+      wiki.safeWrite("wiki/symlinked-file.md", "hacked content")
+    ).toThrow("symlink");
+
+    // Verify the outside file was NOT modified
+    expect(fs.readFileSync(outsideFile, "utf-8")).toBe("original");
+  });
+
   // ── Unicode tricks ──────────────────────────────────────────
 
   it("rejects unicode right-to-left override in path", () => {

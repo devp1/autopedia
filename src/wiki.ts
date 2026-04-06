@@ -13,6 +13,32 @@ export class Wiki {
     this.root = path.resolve(root);
   }
 
+  private validateNoSymlinksInPath(
+    dirPath: string,
+    allowedPrefixes: string[]
+  ): void {
+    if (!fs.existsSync(dirPath)) return;
+
+    const realDir = fs.realpathSync(dirPath);
+    const isRealAllowed = allowedPrefixes.some((prefix) => {
+      const dirBase = prefix.endsWith(path.sep)
+        ? prefix.slice(0, -1)
+        : prefix;
+      const realBase = fs.existsSync(dirBase)
+        ? fs.realpathSync(dirBase)
+        : dirBase;
+      return (
+        realDir === realBase || realDir.startsWith(realBase + path.sep)
+      );
+    });
+
+    if (!isRealAllowed) {
+      throw new Error(
+        `Write rejected: path resolves outside allowed directories via symlink`
+      );
+    }
+  }
+
   // ── Sacred boundary enforcer ──────────────────────────────────
 
   safeWrite(filePath: string, content: string): void {
@@ -41,32 +67,29 @@ export class Wiki {
       );
     }
 
-    // Reject symlinks — resolve the real path of the parent directory
-    const parentDir = path.dirname(resolved);
-    if (fs.existsSync(parentDir)) {
-      const realParent = fs.realpathSync(parentDir);
-      const realAllowed = allowedPrefixes.some((prefix) => {
-        // Strip trailing separator to get the actual directory path
-        const dirPath = prefix.endsWith(path.sep)
-          ? prefix.slice(0, -1)
-          : prefix;
-        const realPrefix = fs.existsSync(dirPath)
-          ? fs.realpathSync(dirPath)
-          : dirPath;
-        return (
-          realParent === realPrefix ||
-          realParent.startsWith(realPrefix + path.sep)
-        );
-      });
-      if (!realAllowed) {
-        throw new Error(
-          `Write rejected: ${filePath} resolves outside allowed directories via symlink`
-        );
-      }
+    // Reject if the target file itself is a symlink (prevents following symlinks)
+    if (fs.existsSync(resolved) && fs.lstatSync(resolved).isSymbolicLink()) {
+      throw new Error(
+        `Write rejected: ${filePath} is a symlink`
+      );
     }
+
+    // Walk the entire path from root to parentDir checking for symlinks
+    const parentDir = path.dirname(resolved);
+    this.validateNoSymlinksInPath(parentDir, allowedPrefixes);
 
     // Ensure parent directory exists
     fs.mkdirSync(parentDir, { recursive: true });
+
+    // Re-validate after mkdir (closes TOCTOU gap for mkdir race)
+    this.validateNoSymlinksInPath(parentDir, allowedPrefixes);
+
+    // Re-check the target isn't now a symlink (closes TOCTOU gap)
+    if (fs.existsSync(resolved) && fs.lstatSync(resolved).isSymbolicLink()) {
+      throw new Error(
+        `Write rejected: ${filePath} became a symlink after validation`
+      );
+    }
 
     fs.writeFileSync(resolved, content, "utf-8");
   }
