@@ -16,7 +16,13 @@
     "lint": "eslint src/ test/ --no-error-on-unmatched-pattern",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["mcp", "wiki", "knowledge-base", "ai", "claude"],
+  "keywords": [
+    "mcp",
+    "wiki",
+    "knowledge-base",
+    "ai",
+    "claude"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
@@ -32,6 +38,7 @@
     "@types/jsdom": "^21.1.7",
     "@types/node": "^22.10.0",
     "eslint": "^9.16.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.18.0",
     "vitest": "^2.1.0"
