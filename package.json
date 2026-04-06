@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/ test/",
+    "lint": "eslint src/ test/ --no-error-on-unmatched-pattern",
     "prepublishOnly": "npm run build"
   },
   "keywords": ["mcp", "wiki", "knowledge-base", "ai", "claude"],
