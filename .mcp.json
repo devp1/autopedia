@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "autopedia": {
+      "command": "node",
+      "args": ["dist/cli.js", "serve", "--dir", ".autopedia"]
+    }
+  }
+}

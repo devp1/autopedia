@@ -6,8 +6,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Wiki, validateUrl } from "./wiki.js";
 import { startServer } from "./mcp.js";
-import { JSDOM } from "jsdom";
-import { Readability } from "@mozilla/readability";
+// JSDOM + Readability are lazy-imported in add command (42s load on WSL2+NTFS)
 
 // Read schema defaults from package directory (single source of truth)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -127,6 +126,8 @@ export function createCli(): Command {
             throw new Error("Response too large (>5MB)");
           }
 
+          const { JSDOM } = await import("jsdom");
+          const { Readability } = await import("@mozilla/readability");
           const dom = new JSDOM(html, { url: source });
           const reader = new Readability(dom.window.document);
           const article = reader.parse();

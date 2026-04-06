@@ -1,8 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { JSDOM } from "jsdom";
-import { Readability } from "@mozilla/readability";
+// JSDOM + Readability are lazy-imported in add_source (42s load on WSL2+NTFS)
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -85,6 +84,8 @@ export function createServer(kbRoot: string): McpServer {
           throw new Error("Response too large (>5MB)");
         }
 
+        const { JSDOM } = await import("jsdom");
+        const { Readability } = await import("@mozilla/readability");
         const dom = new JSDOM(html, { url: input.url });
         const reader = new Readability(dom.window.document);
         const article = reader.parse();
