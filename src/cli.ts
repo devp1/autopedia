@@ -171,9 +171,18 @@ export function createCli(): Command {
       const isUrl = source.startsWith("http://") || source.startsWith("https://");
 
       if (isUrl) {
-        // Fetch and save the content
+        // Validate URL before any network call (SSRF protection)
         try {
           validateUrl(source);
+        } catch (err) {
+          console.error(
+            `Error: URL blocked — ${err instanceof Error ? err.message : "invalid URL"}`
+          );
+          process.exit(1);
+        }
+
+        // Fetch and save the content
+        try {
           const response = await fetch(source);
           const html = await response.text();
           const dom = new JSDOM(html, { url: source });
@@ -184,7 +193,8 @@ export function createCli(): Command {
             ? `# ${article.title}\n\nSource: ${source}\n\n${article.textContent}`
             : `# Fetched from ${source}\n\n${html.slice(0, 5000)}`;
 
-          const slug = `${date}-${source
+          const ts = Date.now().toString(36);
+          const slug = `${date}-${ts}-${source
             .replace(/https?:\/\//, "")
             .replace(/[^a-z0-9]+/gi, "-")
             .slice(0, 40)}`;
@@ -193,7 +203,7 @@ export function createCli(): Command {
 
           console.log(`✓ Saved source: ${source}`);
         } catch (err) {
-          // Save URL reference even if fetch fails
+          // Only queue for retry if URL was valid but fetch failed
           wiki.addToQueue(source);
           console.log(`✓ Queued URL (fetch failed, will retry): ${source}`);
           if (err instanceof Error) {
@@ -202,7 +212,8 @@ export function createCli(): Command {
         }
       } else {
         // Save as text note (via safe write with symlink validation)
-        const slug = `${date}-${source
+        const ts = Date.now().toString(36);
+        const slug = `${date}-${ts}-${source
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, "-")
           .slice(0, 40)
