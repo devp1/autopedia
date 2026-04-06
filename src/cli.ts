@@ -183,8 +183,19 @@ export function createCli(): Command {
 
         // Fetch and save the content
         try {
-          const response = await fetch(source);
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 30000);
+          const response = await fetch(source, {
+            redirect: "error",
+            signal: controller.signal,
+          });
+          clearTimeout(timeout);
+
           const html = await response.text();
+          if (html.length > 5 * 1024 * 1024) {
+            throw new Error("Response too large (>5MB)");
+          }
+
           const dom = new JSDOM(html, { url: source });
           const reader = new Readability(dom.window.document);
           const article = reader.parse();

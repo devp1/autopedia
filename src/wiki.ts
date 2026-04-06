@@ -102,6 +102,12 @@ export class Wiki {
       throw new Error(`Read rejected: ${pagePath} is outside wiki/`);
     }
     if (!fs.existsSync(resolved)) return null;
+
+    // Reject symlinks (prevents arbitrary file reads via symlinked wiki pages)
+    if (fs.lstatSync(resolved).isSymbolicLink()) {
+      throw new Error(`Read rejected: ${pagePath} is a symlink`);
+    }
+
     return fs.readFileSync(resolved, "utf-8");
   }
 

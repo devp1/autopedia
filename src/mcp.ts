@@ -61,8 +61,25 @@ export function createServer(kbRoot: string): McpServer {
         // SSRF protection: only allow http/https and reject private IPs
         validateUrl(input.url);
 
-        const response = await fetch(input.url);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000);
+        const response = await fetch(input.url, {
+          redirect: "error",
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        // Limit response size to 5MB
+        const contentLength = response.headers.get("content-length");
+        if (contentLength && parseInt(contentLength) > 5 * 1024 * 1024) {
+          throw new Error("Response too large (>5MB)");
+        }
+
         const html = await response.text();
+        if (html.length > 5 * 1024 * 1024) {
+          throw new Error("Response too large (>5MB)");
+        }
+
         const dom = new JSDOM(html, { url: input.url });
         const reader = new Readability(dom.window.document);
         const article = reader.parse();
