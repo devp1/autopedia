@@ -46,6 +46,7 @@ describe("MCP Server", () => {
     expect(names).toContain("lint");
     expect(names).toContain("question_assumptions");
     expect(names).toContain("complete_onboarding");
+    expect(names).toContain("read_source");
   });
 
   // ── add_source (text) ─────────────────────────────────────────
@@ -147,13 +148,30 @@ describe("MCP Server", () => {
       expect(data.applied).toBe(3);
     });
 
-    it("rejects operations with empty array", async () => {
+    it("rejects empty operations without queue_item", async () => {
       const result = await client.callTool({
         name: "apply_wiki_ops",
         arguments: { operations: [] },
       });
 
       expect(result.isError).toBe(true);
+    });
+
+    it("allows empty operations with queue_item (mark-only)", async () => {
+      const wiki = new Wiki(tmpDir);
+      wiki.addToQueue("note:test-note");
+
+      const result = await client.callTool({
+        name: "apply_wiki_ops",
+        arguments: { operations: [], queue_item: "note:test-note" },
+      });
+
+      const data = JSON.parse((result.content as Array<{ text: string }>)[0].text);
+      expect(data.applied).toBe(0);
+      expect(data.queue_item_processed).toBe("note:test-note");
+
+      const unprocessed = wiki.listUnprocessedSources();
+      expect(unprocessed).not.toContain("note:test-note");
     });
 
     it("logs operations", async () => {
@@ -450,6 +468,92 @@ describe("MCP Server", () => {
     });
   });
 
+  // ── read_source ───────────────────────────────────────────────
+
+  describe("read_source", () => {
+    it("reads an agent source by slug", async () => {
+      // Write a source file directly
+      const sourceDir = path.join(tmpDir, "sources", "agent");
+      fs.mkdirSync(sourceDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(sourceDir, "2024-01-01-example-com.md"),
+        "# Example Article\n\nSome content here."
+      );
+
+      const result = await client.callTool({
+        name: "read_source",
+        arguments: { slug: "2024-01-01-example-com" },
+      });
+
+      const text = (result.content as Array<{ text: string }>)[0].text;
+      expect(text).toContain("Example Article");
+    });
+
+    it("reads a user note by slug", async () => {
+      const notesDir = path.join(tmpDir, "sources", "user", "notes");
+      fs.mkdirSync(notesDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(notesDir, "my-thought.md"),
+        "Inference costs are dropping fast."
+      );
+
+      const result = await client.callTool({
+        name: "read_source",
+        arguments: { slug: "my-thought" },
+      });
+
+      const text = (result.content as Array<{ text: string }>)[0].text;
+      expect(text).toContain("Inference costs");
+    });
+
+    it("returns error for non-existent source", async () => {
+      const result = await client.callTool({
+        name: "read_source",
+        arguments: { slug: "does-not-exist" },
+      });
+
+      expect(result.isError).toBe(true);
+    });
+
+    it("rejects path traversal", async () => {
+      const result = await client.callTool({
+        name: "read_source",
+        arguments: { slug: "../../etc/passwd" },
+      });
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  // ── apply_wiki_ops with queue_item ────────────────────────────
+
+  describe("apply_wiki_ops queue_item", () => {
+    it("marks queue item as processed", async () => {
+      // Add something to the queue first
+      const wiki = new Wiki(tmpDir);
+      wiki.addToQueue("https://example.com/article");
+
+      // Verify it's unprocessed
+      let unprocessed = wiki.listUnprocessedSources();
+      expect(unprocessed).toContain("https://example.com/article");
+
+      // Apply ops with queue_item
+      await client.callTool({
+        name: "apply_wiki_ops",
+        arguments: {
+          operations: [
+            { op: "create", path: "article.md", content: "# Article\n\nContent." },
+          ],
+          queue_item: "https://example.com/article",
+        },
+      });
+
+      // Verify it's now processed
+      unprocessed = wiki.listUnprocessedSources();
+      expect(unprocessed).not.toContain("https://example.com/article");
+    });
+  });
+
   // ── Resource: autopedia://prompt ──────────────────────────────
 
   describe("autopedia://prompt resource", () => {
@@ -484,6 +588,56 @@ describe("MCP Server", () => {
       // Should serve the package prompt.md (contains the full system prompt)
       expect(text).toContain("autopedia System Prompt");
       expect(text).toContain("Onboarding");
+    });
+  });
+
+  // ── Resource: autopedia://identity ─────────────────────────────
+
+  describe("autopedia://identity resource", () => {
+    it("reads the identity resource", async () => {
+      fs.mkdirSync(path.join(tmpDir, "schema"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "schema", "identity.md"),
+        "# Identity\n\n## Who am I?\n- Name: Test User"
+      );
+
+      const result = await client.readResource({
+        uri: "autopedia://identity",
+      });
+
+      const text = (result.contents[0] as { text: string }).text;
+      expect(text).toContain("Test User");
+    });
+
+    it("returns fallback when no identity file exists", async () => {
+      const idPath = path.join(tmpDir, "schema", "identity.md");
+      if (fs.existsSync(idPath)) fs.unlinkSync(idPath);
+
+      const result = await client.readResource({
+        uri: "autopedia://identity",
+      });
+
+      const text = (result.contents[0] as { text: string }).text;
+      expect(text).toContain("No identity configured");
+    });
+  });
+
+  // ── Resource: autopedia://interests ────────────────────────────
+
+  describe("autopedia://interests resource", () => {
+    it("reads the interests resource", async () => {
+      fs.mkdirSync(path.join(tmpDir, "schema"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "schema", "interests.md"),
+        "# Interests\n\n## Topics I follow\n- Inference costs"
+      );
+
+      const result = await client.readResource({
+        uri: "autopedia://interests",
+      });
+
+      const text = (result.contents[0] as { text: string }).text;
+      expect(text).toContain("Inference costs");
     });
   });
 });

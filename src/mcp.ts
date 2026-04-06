@@ -23,7 +23,8 @@ const AddSourceInput = z.object({
 });
 
 const ApplyWikiOpsInput = z.object({
-  operations: z.array(WikiOpSchema).min(1),
+  operations: z.array(WikiOpSchema),
+  queue_item: z.string().optional(),
 });
 
 const SearchInput = z.object({
@@ -143,7 +144,7 @@ export function createServer(kbRoot: string): McpServer {
 
   server.tool(
     "apply_wiki_ops",
-    "Apply create/update operations to wiki pages. For updates, returns current page state first (read-before-write).",
+    "Apply create/update operations to wiki pages. For updates, returns current page state first (read-before-write). Pass queue_item to mark a source queue entry as processed (operations can be empty if only marking processed).",
     {
       operations: z
         .array(
@@ -152,11 +153,14 @@ export function createServer(kbRoot: string): McpServer {
             path: z.string().min(1),
             content: z.string(),
           })
-        )
-        .min(1),
+        ),
+      queue_item: z.string().optional(),
     },
     async (args) => {
       const input = ApplyWikiOpsInput.parse(args);
+      if (input.operations.length === 0 && !input.queue_item) {
+        throw new Error("Either operations or queue_item must be provided");
+      }
       const currentState: Record<string, string | null> = {};
       let applied = 0;
 
@@ -175,11 +179,20 @@ export function createServer(kbRoot: string): McpServer {
 
       wiki.updateMetrics();
 
+      // Mark queue item as processed if provided
+      if (input.queue_item) {
+        wiki.markProcessed(input.queue_item);
+      }
+
       return {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify({ applied, current_state: currentState }),
+            text: JSON.stringify({
+              applied,
+              current_state: currentState,
+              queue_item_processed: input.queue_item ?? null,
+            }),
           },
         ],
       };
@@ -228,6 +241,48 @@ export function createServer(kbRoot: string): McpServer {
 
       return {
         content: [{ type: "text" as const, text: content }],
+      };
+    }
+  );
+
+  // ── QUERY: read_source ──────────────────────────────────────
+
+  server.tool(
+    "read_source",
+    "Read a saved source by slug (from CLI queue or prior ingest). Checks sources/agent/ and sources/user/notes/.",
+    { slug: z.string().min(1) },
+    async (args) => {
+      // Reject path traversal
+      if (args.slug.includes("..") || args.slug.includes("/") || args.slug.includes("\\") || args.slug.includes("\0")) {
+        throw new Error("Invalid slug: path traversal not allowed");
+      }
+
+      const filename = args.slug.endsWith(".md") ? args.slug : `${args.slug}.md`;
+
+      // Try sources/agent/ first, then sources/user/notes/
+      const candidates = [
+        path.join(kbRoot, "sources", "agent", filename),
+        path.join(kbRoot, "sources", "user", "notes", filename),
+      ];
+
+      for (const filePath of candidates) {
+        if (fs.existsSync(filePath)) {
+          // Symlink protection
+          if (fs.lstatSync(filePath).isSymbolicLink()) {
+            throw new Error(`Read rejected: ${filename} is a symlink`);
+          }
+          const content = fs.readFileSync(filePath, "utf-8");
+          return {
+            content: [{ type: "text" as const, text: content }],
+          };
+        }
+      }
+
+      return {
+        content: [
+          { type: "text" as const, text: `Source not found: ${args.slug}` },
+        ],
+        isError: true,
       };
     }
   );
@@ -509,6 +564,60 @@ export function createServer(kbRoot: string): McpServer {
         contents: [
           {
             uri: "autopedia://prompt",
+            mimeType: "text/markdown",
+            text: content,
+          },
+        ],
+      };
+    }
+  );
+
+  // ── Resource: autopedia://identity ───────────────────────────
+
+  server.resource(
+    "autopedia-identity",
+    "autopedia://identity",
+    {
+      description:
+        "The user's identity profile. Who they are, what they do, their background.",
+    },
+    async () => {
+      const filePath = path.join(kbRoot, "schema", "identity.md");
+      const content = fs.existsSync(filePath)
+        ? fs.readFileSync(filePath, "utf-8")
+        : "# Identity\n\nNo identity configured. Run onboarding first.";
+
+      return {
+        contents: [
+          {
+            uri: "autopedia://identity",
+            mimeType: "text/markdown",
+            text: content,
+          },
+        ],
+      };
+    }
+  );
+
+  // ── Resource: autopedia://interests ─────────────────────────
+
+  server.resource(
+    "autopedia-interests",
+    "autopedia://interests",
+    {
+      description:
+        "The user's interests. Topics they follow, questions they explore, sources they trust.",
+    },
+    async () => {
+      const filePath = path.join(kbRoot, "schema", "interests.md");
+      const content = fs.existsSync(filePath)
+        ? fs.readFileSync(filePath, "utf-8")
+        : "# Interests\n\nNo interests configured. Run onboarding first.";
+
+      return {
+        contents: [
+          {
+            uri: "autopedia://interests",
             mimeType: "text/markdown",
             text: content,
           },
