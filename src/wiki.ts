@@ -110,7 +110,8 @@ export class Wiki {
       ? path.resolve(this.root, "wiki", dir)
       : path.join(this.root, "wiki");
 
-    if (!baseDir.startsWith(path.join(this.root, "wiki"))) {
+    const wikiDir = path.join(this.root, "wiki");
+    if (baseDir !== wikiDir && !baseDir.startsWith(wikiDir + path.sep)) {
       throw new Error(`List rejected: ${dir} is outside wiki/`);
     }
     if (!fs.existsSync(baseDir)) return [];
@@ -255,6 +256,93 @@ export class Wiki {
       if (!fs.existsSync(fullPath)) {
         this.safeWrite(filePath, content);
       }
+    }
+  }
+
+  // ── Safe note writing (sources/user/notes/) ───────────────
+
+  safeWriteNote(slug: string, content: string): void {
+    const notePath = path.join("sources", "user", "notes", `${slug}.md`);
+    const resolved = path.resolve(this.root, notePath);
+    const allowedDir =
+      path.join(this.root, "sources", "user", "notes") + path.sep;
+
+    if (!resolved.startsWith(allowedDir)) {
+      throw new Error(
+        `Write rejected: note path resolves outside sources/user/notes/`
+      );
+    }
+
+    // Check target file for symlink
+    if (fs.existsSync(resolved) && fs.lstatSync(resolved).isSymbolicLink()) {
+      throw new Error(`Write rejected: target is a symlink`);
+    }
+
+    // Walk ancestor directories for symlinks
+    const parentDir = path.dirname(resolved);
+    if (fs.existsSync(parentDir)) {
+      const realParent = fs.realpathSync(parentDir);
+      const expectedDir = allowedDir.slice(0, -1); // strip trailing sep
+      if (
+        realParent !== expectedDir &&
+        !realParent.startsWith(allowedDir)
+      ) {
+        throw new Error(
+          `Write rejected: ancestor directory is a symlink outside allowed path`
+        );
+      }
+    }
+
+    fs.mkdirSync(parentDir, { recursive: true });
+    fs.writeFileSync(resolved, content, "utf-8");
+  }
+}
+
+// ── URL validation (SSRF protection) ──────────────────────────
+
+export function validateUrl(url: string): void {
+  const parsed = new URL(url);
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`URL scheme not allowed: ${parsed.protocol}`);
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  const blockedHosts = new Set([
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+    "::1",
+    "::ffff:127.0.0.1",
+    "metadata.google.internal",
+    "169.254.169.254",
+  ]);
+  if (blockedHosts.has(hostname)) {
+    throw new Error(`URL hostname blocked: ${hostname}`);
+  }
+
+  if (hostname.includes(":")) {
+    throw new Error(`IPv6 addresses are not allowed: ${hostname}`);
+  }
+
+  if (/^[0-9]/.test(hostname) && !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+    throw new Error(`Non-standard IP notation not allowed: ${hostname}`);
+  }
+
+  const ipMatch = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (ipMatch) {
+    const [, a, b] = ipMatch.map(Number);
+    if (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168)
+    ) {
+      throw new Error(`URL points to private/reserved IP range: ${hostname}`);
     }
   }
 }

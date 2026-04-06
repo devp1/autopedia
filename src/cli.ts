@@ -2,7 +2,7 @@
 import { Command } from "commander";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { Wiki } from "./wiki.js";
+import { Wiki, validateUrl } from "./wiki.js";
 import { startServer } from "./mcp.js";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
@@ -173,6 +173,7 @@ export function createCli(): Command {
       if (isUrl) {
         // Fetch and save the content
         try {
+          validateUrl(source);
           const response = await fetch(source);
           const html = await response.text();
           const dom = new JSDOM(html, { url: source });
@@ -200,15 +201,13 @@ export function createCli(): Command {
           }
         }
       } else {
-        // Save as text note
+        // Save as text note (via safe write with symlink validation)
         const slug = `${date}-${source
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, "-")
           .slice(0, 40)
           .replace(/-+$/, "")}`;
-        const notePath = path.join(kbRoot, "sources", "user", "notes", `${slug}.md`);
-        fs.mkdirSync(path.dirname(notePath), { recursive: true });
-        fs.writeFileSync(notePath, source, "utf-8");
+        wiki.safeWriteNote(slug, source);
         wiki.addToQueue(`note:${slug}`);
 
         console.log(`✓ Saved note: "${source.slice(0, 50)}${source.length > 50 ? "..." : ""}"`);
