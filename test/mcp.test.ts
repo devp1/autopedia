@@ -45,6 +45,7 @@ describe("MCP Server", () => {
     expect(names).toContain("get_status");
     expect(names).toContain("lint");
     expect(names).toContain("question_assumptions");
+    expect(names).toContain("complete_onboarding");
   });
 
   // ── add_source (text) ─────────────────────────────────────────
@@ -363,6 +364,92 @@ describe("MCP Server", () => {
     });
   });
 
+  // ── complete_onboarding ────────────────────────────────────────
+
+  describe("complete_onboarding", () => {
+    it("writes identity and interests files", async () => {
+      const result = await client.callTool({
+        name: "complete_onboarding",
+        arguments: {
+          identity: "# Identity\n\n## Who am I?\n- Name: Test User\n- Role: Developer",
+          interests: "# Interests\n\n## Topics I follow\n- TypeScript\n- MCP servers",
+        },
+      });
+
+      const data = JSON.parse((result.content as Array<{ text: string }>)[0].text);
+      expect(data.status).toBe("ok");
+
+      // Verify files were written
+      const identity = fs.readFileSync(path.join(tmpDir, "schema", "identity.md"), "utf-8");
+      expect(identity).toContain("Test User");
+
+      const interests = fs.readFileSync(path.join(tmpDir, "schema", "interests.md"), "utf-8");
+      expect(interests).toContain("MCP servers");
+    });
+
+    it("rejects empty identity", async () => {
+      const result = await client.callTool({
+        name: "complete_onboarding",
+        arguments: {
+          identity: "",
+          interests: "# Interests\n\nSome interests",
+        },
+      });
+
+      expect(result.isError).toBe(true);
+    });
+
+    it("rejects empty interests", async () => {
+      const result = await client.callTool({
+        name: "complete_onboarding",
+        arguments: {
+          identity: "# Identity\n\nSome identity",
+          interests: "",
+        },
+      });
+
+      expect(result.isError).toBe(true);
+    });
+
+    it("rejects oversized content", async () => {
+      const bigContent = "x".repeat(11 * 1024); // > 10KB
+
+      const result = await client.callTool({
+        name: "complete_onboarding",
+        arguments: {
+          identity: bigContent,
+          interests: "# Interests\n\nSome interests",
+        },
+      });
+
+      expect(result.isError).toBe(true);
+    });
+
+    it("overwrites existing schema files on second call", async () => {
+      // First call
+      await client.callTool({
+        name: "complete_onboarding",
+        arguments: {
+          identity: "# Identity\n\nVersion 1",
+          interests: "# Interests\n\nVersion 1",
+        },
+      });
+
+      // Second call
+      await client.callTool({
+        name: "complete_onboarding",
+        arguments: {
+          identity: "# Identity\n\nVersion 2",
+          interests: "# Interests\n\nVersion 2",
+        },
+      });
+
+      const identity = fs.readFileSync(path.join(tmpDir, "schema", "identity.md"), "utf-8");
+      expect(identity).toContain("Version 2");
+      expect(identity).not.toContain("Version 1");
+    });
+  });
+
   // ── Resource: autopedia://prompt ──────────────────────────────
 
   describe("autopedia://prompt resource", () => {
@@ -371,26 +458,22 @@ describe("MCP Server", () => {
       expect(resources.some((r) => r.uri === "autopedia://prompt")).toBe(true);
     });
 
-    it("reads the prompt resource", async () => {
-      // Write a prompt file
-      fs.writeFileSync(
-        path.join(tmpDir, "schema", "prompt.md"),
-        "# System Prompt\n\nYou are a wiki maintainer."
-      );
-
+    it("reads the prompt resource from package dir", async () => {
       const result = await client.readResource({
         uri: "autopedia://prompt",
       });
 
       const text = (result.contents[0] as { text: string }).text;
-      expect(text).toContain("System Prompt");
+      // Should serve the package's schema/prompt.md
+      expect(text).toContain("autopedia System Prompt");
+      expect(text).toContain("Three Operations");
     });
 
-    it("returns fallback when no prompt file exists", async () => {
-      // Remove the prompt file if it exists
-      const promptPath = path.join(tmpDir, "schema", "prompt.md");
-      if (fs.existsSync(promptPath)) {
-        fs.unlinkSync(promptPath);
+    it("serves prompt from package dir even when kbRoot has no prompt", async () => {
+      // Remove prompt from kbRoot — should still serve from package
+      const kbPromptPath = path.join(tmpDir, "schema", "prompt.md");
+      if (fs.existsSync(kbPromptPath)) {
+        fs.unlinkSync(kbPromptPath);
       }
 
       const result = await client.readResource({
@@ -398,7 +481,9 @@ describe("MCP Server", () => {
       });
 
       const text = (result.contents[0] as { text: string }).text;
-      expect(text).toContain("autopedia init");
+      // Should serve the package prompt.md (contains the full system prompt)
+      expect(text).toContain("autopedia System Prompt");
+      expect(text).toContain("Onboarding");
     });
   });
 });

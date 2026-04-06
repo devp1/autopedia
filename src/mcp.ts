@@ -5,6 +5,7 @@ import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Wiki, validateUrl } from "./wiki.js";
 
 // ── Zod schemas ─────────────────────────────────────────────────
@@ -35,6 +36,10 @@ const ReadPageInput = z.object({
 });
 
 // ── Server factory ──────────────────────────────────────────────
+
+// Package schema directory (prompt.md served from here, auto-updates on upgrade)
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PACKAGE_SCHEMA_DIR = path.resolve(__dirname, "..", "schema");
 
 export function createServer(kbRoot: string): McpServer {
   const wiki = new Wiki(kbRoot);
@@ -426,6 +431,63 @@ export function createServer(kbRoot: string): McpServer {
     }
   );
 
+  // ── ONBOARDING: complete_onboarding ─────────────────────────
+
+  server.tool(
+    "complete_onboarding",
+    "Write the user's identity and interests to schema files after a conversational interview. Only call this after gathering enough information through conversation.",
+    {
+      identity: z.string().min(1, "Identity content is required"),
+      interests: z.string().min(1, "Interests content is required"),
+    },
+    async (args) => {
+      const MAX_SIZE = 10 * 1024; // 10KB
+      if (args.identity.length > MAX_SIZE) {
+        throw new Error(`Identity content too large (${args.identity.length} chars, max ${MAX_SIZE})`);
+      }
+      if (args.interests.length > MAX_SIZE) {
+        throw new Error(`Interests content too large (${args.interests.length} chars, max ${MAX_SIZE})`);
+      }
+
+      const schemaDir = path.join(kbRoot, "schema");
+
+      // Symlink protection: reject if schema/ directory itself is a symlink
+      if (fs.existsSync(schemaDir) && fs.lstatSync(schemaDir).isSymbolicLink()) {
+        throw new Error("Write rejected: schema/ directory is a symlink");
+      }
+
+      fs.mkdirSync(schemaDir, { recursive: true });
+
+      const identityPath = path.join(schemaDir, "identity.md");
+      const interestsPath = path.join(schemaDir, "interests.md");
+
+      // Symlink protection: reject if target files are symlinks
+      for (const filePath of [identityPath, interestsPath]) {
+        if (fs.existsSync(filePath) && fs.lstatSync(filePath).isSymbolicLink()) {
+          throw new Error(`Write rejected: ${path.basename(filePath)} is a symlink`);
+        }
+      }
+
+      fs.writeFileSync(identityPath, args.identity, "utf-8");
+      fs.writeFileSync(interestsPath, args.interests, "utf-8");
+
+      wiki.appendLog("onboarding: identity and interests updated");
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({
+              status: "ok",
+              identity_size: args.identity.length,
+              interests_size: args.interests.length,
+            }),
+          },
+        ],
+      };
+    }
+  );
+
   // ── Resource: autopedia://prompt ────────────────────────────
 
   server.resource(
@@ -436,7 +498,8 @@ export function createServer(kbRoot: string): McpServer {
         "The autopedia system prompt. Teaches the host LLM how to maintain the wiki.",
     },
     async () => {
-      const promptPath = path.join(kbRoot, "schema", "prompt.md");
+      // Serve prompt from package dir (auto-updates on package upgrade)
+      const promptPath = path.join(PACKAGE_SCHEMA_DIR, "prompt.md");
       const content = fs.existsSync(promptPath)
         ? fs.readFileSync(promptPath, "utf-8")
         : "# autopedia prompt\n\nNo prompt configured. Run `autopedia init` first.";

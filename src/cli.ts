@@ -1,103 +1,35 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Wiki, validateUrl } from "./wiki.js";
 import { startServer } from "./mcp.js";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 
-const DEFAULT_PROMPT = `# autopedia System Prompt
+// Read schema defaults from package directory (single source of truth)
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PACKAGE_SCHEMA_DIR = path.resolve(__dirname, "..", "schema");
 
-You are maintaining a personal knowledge wiki via the autopedia MCP server.
-
-## Three Operations (Karpathy's framework)
-
-### INGEST
-When the user shares a URL or text:
-1. Call \`add_source\` to fetch/save and get relevant context
-2. Analyze the source content against existing wiki pages
-3. Call \`apply_wiki_ops\` to create or update wiki pages
-
-### QUERY
-When the user asks a question:
-1. Call \`search\` to find relevant wiki pages
-2. Call \`read_page\` for full content
-3. Answer grounded in the user's own research
-
-### LINT
-Periodically (or when asked):
-1. Call \`lint\` to find issues (orphans, stale pages, contradictions)
-2. Call \`question_assumptions\` to challenge high-confidence claims
-3. Fix issues via \`apply_wiki_ops\`
-
-## Wiki Page Format
-
-Every page must have:
-- A clear \`# Title\`
-- A \`## TLDR\` section (1-2 sentences)
-- A \`## Counter-arguments\` section (specific, not generic)
-- Wikilinks to related pages: \`[[page-name]]\`
-- When updating index.md: one line per page with TLDR
-
-## Rules
-- Never delete user content — only add, update, or reorganize
-- Always include counter-arguments for claims
-- Keep pages focused on one topic
-- Cross-reference related pages with wikilinks
-- Update index.md when adding new pages
-`;
-
-const DEFAULT_IDENTITY = `# Identity
-
-<!-- Edit this file to describe yourself -->
-<!-- This helps autopedia understand your perspective -->
-
-## Who am I?
-- Name:
-- Role:
-- Background:
-
-## What matters to me?
-- Key interests:
-- Professional focus:
-- Learning goals:
-`;
-
-const DEFAULT_INTERESTS = `# Interests
-
-<!-- Edit this file to list your areas of interest -->
-<!-- autopedia will prioritize these when processing sources -->
-
-## Topics I follow
--
-
-## Questions I'm exploring
--
-
-## Sources I trust
--
-`;
-
-const DEFAULT_RULES = `# Rules
-
-<!-- Edit this file to set rules for your wiki -->
-<!-- These override default behavior -->
-
-## Content rules
-- Always include counter-arguments
-- Prefer primary sources over commentary
-
-## Style rules
-- Use clear, concise language
-- Link related topics with wikilinks
-
-## Boundaries
-- Don't add content about:
-`;
+function readSchemaDefault(filename: string): string {
+  const filePath = path.join(PACKAGE_SCHEMA_DIR, filename);
+  return fs.readFileSync(filePath, "utf-8");
+}
 
 function findKbRoot(): string {
-  return path.resolve(process.cwd(), ".autopedia");
+  const globalRoot = path.join(os.homedir(), ".autopedia");
+  const localRoot = path.resolve(process.cwd(), ".autopedia");
+
+  // Migration warning: local wiki exists but global doesn't
+  if (!fs.existsSync(globalRoot) && fs.existsSync(localRoot)) {
+    console.error(
+      "Note: Found local wiki at ./.autopedia/ — use --dir to access it, or move it to ~/.autopedia/"
+    );
+  }
+
+  return globalRoot;
 }
 
 export function createCli(): Command {
@@ -113,42 +45,40 @@ export function createCli(): Command {
   program
     .command("init")
     .description("Initialize a new autopedia knowledge base")
-    .option("-d, --dir <path>", "Directory for .autopedia/", ".")
-    .action(async (opts: { dir: string }) => {
-      const kbRoot = path.resolve(opts.dir, ".autopedia");
+    .option("-d, --dir <path>", "Directory for .autopedia/ (default: ~/)")
+    .action(async (opts: { dir?: string }) => {
+      const kbRoot = opts.dir
+        ? path.resolve(opts.dir, ".autopedia")
+        : path.join(os.homedir(), ".autopedia");
       const wiki = new Wiki(kbRoot);
       wiki.init();
 
-      // Write schema files
-      const schemaFiles: Record<string, string> = {
-        "schema/prompt.md": DEFAULT_PROMPT,
-        "schema/identity.md": DEFAULT_IDENTITY,
-        "schema/interests.md": DEFAULT_INTERESTS,
-        "schema/rules.md": DEFAULT_RULES,
-      };
+      // Copy user-editable schema files (NOT prompt.md — served from package)
+      const userSchemaFiles = ["identity.md", "interests.md", "rules.md"];
+      const schemaDir = path.join(kbRoot, "schema");
+      fs.mkdirSync(schemaDir, { recursive: true });
 
-      for (const [filePath, content] of Object.entries(schemaFiles)) {
-        const fullPath = path.join(kbRoot, filePath);
-        if (!fs.existsSync(fullPath)) {
-          fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-          fs.writeFileSync(fullPath, content, "utf-8");
+      for (const filename of userSchemaFiles) {
+        const destPath = path.join(schemaDir, filename);
+        if (!fs.existsSync(destPath)) {
+          fs.writeFileSync(destPath, readSchemaDefault(filename), "utf-8");
         }
       }
 
-      console.log(`✓ Created .autopedia/ in ${path.resolve(opts.dir)}`);
+      console.log(`✓ Created .autopedia/ at ${kbRoot}`);
       console.log("");
       console.log("Next steps:");
       console.log(
-        "  1. Edit .autopedia/schema/identity.md — tell autopedia who you are"
+        "  1. Add to your AI tool's global MCP config (~/.claude.json):"
       );
+      console.log("");
+      console.log('     { "mcpServers": { "autopedia": {');
+      console.log('         "command": "node",');
+      console.log(`         "args": ["${path.resolve(__dirname, "..", "dist", "cli.js")}", "serve"]`);
+      console.log("     }}}");
+      console.log("");
       console.log(
-        "  2. Edit .autopedia/schema/interests.md — what you care about"
-      );
-      console.log(
-        "  3. Run: autopedia serve — start the MCP server"
-      );
-      console.log(
-        '  4. Add to your AI tool\'s MCP config: { "command": "autopedia", "args": ["serve"] }'
+        "  2. Start a conversation — autopedia will interview you to set up your profile."
       );
     });
 
@@ -157,8 +87,9 @@ export function createCli(): Command {
   program
     .command("add <source>")
     .description("Add a URL or text to the source queue (no LLM call)")
-    .action(async (source: string) => {
-      const kbRoot = findKbRoot();
+    .option("-d, --dir <path>", "Path to .autopedia/")
+    .action(async (source: string, opts: { dir?: string }) => {
+      const kbRoot = opts.dir ? path.resolve(opts.dir) : findKbRoot();
       if (!fs.existsSync(kbRoot)) {
         console.error(
           "Error: .autopedia/ not found. Run `autopedia init` first."
@@ -263,8 +194,9 @@ export function createCli(): Command {
   program
     .command("status")
     .description("Show wiki status and stats")
-    .action(async () => {
-      const kbRoot = findKbRoot();
+    .option("-d, --dir <path>", "Path to .autopedia/")
+    .action(async (opts: { dir?: string }) => {
+      const kbRoot = opts.dir ? path.resolve(opts.dir) : findKbRoot();
       if (!fs.existsSync(kbRoot)) {
         console.error(
           "Error: .autopedia/ not found. Run `autopedia init` first."

@@ -48,6 +48,11 @@ describe("System prompt quality", () => {
       expect(promptContent).toContain("lint");
       expect(promptContent).toContain("question_assumptions");
     });
+
+    it("documents Onboarding flow", () => {
+      expect(promptContent).toContain("Onboarding");
+      expect(promptContent).toContain("complete_onboarding");
+    });
   });
 
   // ── Wiki page format ──────────────────────────────────────────

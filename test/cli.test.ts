@@ -7,14 +7,6 @@ import { Wiki } from "../src/wiki.js";
 // We test CLI logic by directly testing the init/add/status operations
 // through the Wiki class and file system, avoiding slow subprocess spawns.
 
-const DEFAULT_PROMPT_SECTIONS = [
-  "INGEST",
-  "QUERY",
-  "LINT",
-  "Counter-arguments",
-  "wikilinks",
-];
-
 describe("CLI: autopedia init", () => {
   let tmpDir: string;
   let kbRoot: string;
@@ -28,23 +20,22 @@ describe("CLI: autopedia init", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  // Helper: simulate `autopedia init` logic
+  // Helper: simulate `autopedia init` logic (matches new cli.ts behavior)
   function doInit() {
     const wiki = new Wiki(kbRoot);
     wiki.init();
 
-    // Write schema files (same as cli.ts)
+    // Copy user-editable schema files (NOT prompt.md — served from package)
     const schemaDir = path.join(kbRoot, "schema");
     fs.mkdirSync(schemaDir, { recursive: true });
 
-    const schemaFiles: Record<string, string> = {
-      "prompt.md": "# autopedia System Prompt\n\n## Three Operations\n\n### INGEST\nProcess sources.\n\n### QUERY\nSearch and answer.\n\n### LINT\nFind issues.\n\n## Wiki Page Format\n- Counter-arguments section\n- wikilinks to related pages\n",
+    const userSchemaFiles: Record<string, string> = {
       "identity.md": "# Identity\n\n## Who am I?\n- Name:\n",
       "interests.md": "# Interests\n\n## Topics I follow\n-\n",
       "rules.md": "# Rules\n\n## Content rules\n- Always include counter-arguments\n",
     };
 
-    for (const [file, content] of Object.entries(schemaFiles)) {
+    for (const [file, content] of Object.entries(userSchemaFiles)) {
       const fullPath = path.join(schemaDir, file);
       if (!fs.existsSync(fullPath)) {
         fs.writeFileSync(fullPath, content, "utf-8");
@@ -85,27 +76,14 @@ describe("CLI: autopedia init", () => {
       expect(fs.existsSync(path.join(kbRoot, "ops", "queue.md"))).toBe(true);
     });
 
-    it("creates schema files", () => {
+    it("creates user-editable schema files (not prompt.md)", () => {
       doInit();
 
-      expect(fs.existsSync(path.join(kbRoot, "schema", "prompt.md"))).toBe(true);
+      // prompt.md is served from package dir, NOT copied to user dir
+      expect(fs.existsSync(path.join(kbRoot, "schema", "prompt.md"))).toBe(false);
       expect(fs.existsSync(path.join(kbRoot, "schema", "identity.md"))).toBe(true);
       expect(fs.existsSync(path.join(kbRoot, "schema", "interests.md"))).toBe(true);
       expect(fs.existsSync(path.join(kbRoot, "schema", "rules.md"))).toBe(true);
-    });
-
-    it("prompt.md contains required sections", () => {
-      doInit();
-
-      const prompt = fs.readFileSync(
-        path.join(kbRoot, "schema", "prompt.md"),
-        "utf-8"
-      );
-      for (const section of DEFAULT_PROMPT_SECTIONS) {
-        expect(prompt, `prompt.md should contain "${section}"`).toContain(
-          section
-        );
-      }
     });
 
     it("does not overwrite existing files on re-init", () => {
