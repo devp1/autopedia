@@ -23,8 +23,16 @@
     "ai",
     "claude"
   ],
-  "author": "",
+  "author": "devp1",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devp1/autopedia.git"
+  },
+  "homepage": "https://github.com/devp1/autopedia",
+  "bugs": {
+    "url": "https://github.com/devp1/autopedia/issues"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@mozilla/readability": "^0.6.0",

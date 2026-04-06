@@ -190,6 +190,177 @@ export function createCli(): Command {
       await startServer(kbRoot);
     });
 
+  // ── view ────────────────────────────────────────────────────
+
+  program
+    .command("view")
+    .description("Browse your wiki locally with Quartz")
+    .option("-p, --port <port>", "Port to serve on", "8080")
+    .option("-d, --dir <path>", "Path to .autopedia/")
+    .action(async (opts: { port: string; dir?: string }) => {
+      // Validate port is a safe integer
+      const port = parseInt(opts.port, 10);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        console.error("Error: --port must be an integer between 1 and 65535.");
+        process.exit(1);
+      }
+      const portStr = String(port);
+
+      const kbRoot = opts.dir ? path.resolve(opts.dir) : findKbRoot();
+      if (!fs.existsSync(kbRoot)) {
+        console.error(
+          "Error: .autopedia/ not found. Run `autopedia init` first."
+        );
+        process.exit(1);
+      }
+
+      const wikiDir = path.join(kbRoot, "wiki");
+      if (!fs.existsSync(wikiDir)) {
+        console.error("Error: No wiki/ directory found. Add some content first.");
+        process.exit(1);
+      }
+
+      const quartzDir = path.join(kbRoot, ".quartz");
+      const { execFileSync, spawn: spawnProc } = await import("node:child_process");
+
+      // Clone Quartz on first run
+      if (!fs.existsSync(quartzDir)) {
+        console.log("Setting up Quartz (first run only)...");
+
+        try {
+          execFileSync("git", ["--version"], { stdio: "ignore" });
+        } catch {
+          console.error("Error: git is required to set up Quartz. Install git and try again.");
+          process.exit(1);
+        }
+
+        console.log("Cloning Quartz v4...");
+        execFileSync(
+          "git",
+          ["clone", "--depth", "1", "https://github.com/jackyzha0/quartz.git", quartzDir],
+          { stdio: "inherit" }
+        );
+
+        console.log("Installing Quartz dependencies...");
+        execFileSync("npm", ["install"], { cwd: quartzDir, stdio: "inherit" });
+      }
+
+      // Write Quartz config pointing at wiki/
+      const quartzConfig = `import { QuartzConfig } from "./quartz/cfg"
+import * as Plugin from "./quartz/plugins"
+
+const config: QuartzConfig = {
+  configuration: {
+    pageTitle: "autopedia",
+    enableSPA: true,
+    enablePopovers: true,
+    analytics: null,
+    locale: "en-US",
+    baseUrl: "localhost",
+    ignorePatterns: ["private", "templates", ".obsidian"],
+    defaultDateType: "modified",
+    theme: {
+      fontOrigin: "googleFonts",
+      cdnCaching: true,
+      typography: {
+        header: "Schibsted Grotesk",
+        body: "Source Sans Pro",
+        code: "IBM Plex Mono",
+      },
+      colors: {
+        lightMode: {
+          light: "#faf8f8",
+          lightgray: "#e5e5e5",
+          gray: "#b8b8b8",
+          darkgray: "#4e4e4e",
+          dark: "#2b2b2b",
+          secondary: "#284b63",
+          tertiary: "#84a59d",
+          highlight: "rgba(143, 159, 169, 0.15)",
+          textHighlight: "#fff23688",
+        },
+        darkMode: {
+          light: "#161618",
+          lightgray: "#393639",
+          gray: "#646464",
+          darkgray: "#d4d4d4",
+          dark: "#ebebec",
+          secondary: "#7b97aa",
+          tertiary: "#84a59d",
+          highlight: "rgba(143, 159, 169, 0.15)",
+          textHighlight: "#fff23688",
+        },
+      },
+    },
+  },
+  plugins: {
+    transformers: [
+      Plugin.FrontMatter(),
+      Plugin.CreatedModifiedDate({ priority: ["filesystem"] }),
+      Plugin.SyntaxHighlighting(),
+      Plugin.ObsidianFlavoredMarkdown({ enableInHtmlEmbed: false }),
+      Plugin.GitHubFlavoredMarkdown(),
+      Plugin.TableOfContents(),
+      Plugin.CrawlLinks({ markdownLinkResolution: "shortest" }),
+      Plugin.Description(),
+    ],
+    filters: [Plugin.RemoveDrafts()],
+    emitters: [
+      Plugin.AliasRedirects(),
+      Plugin.ComponentResources(),
+      Plugin.ContentPage(),
+      Plugin.FolderPage(),
+      Plugin.TagPage(),
+      Plugin.ContentIndex({ enableSiteMap: false, enableRSS: false }),
+      Plugin.Assets(),
+      Plugin.Static(),
+      Plugin.NotFoundPage(),
+    ],
+  },
+}
+
+export default config
+`;
+      fs.writeFileSync(path.join(quartzDir, "quartz.config.ts"), quartzConfig);
+
+      console.log(`\nServing wiki on http://localhost:${portStr}`);
+      console.log("Press Ctrl+C to stop.\n");
+
+      // Open browser after a short delay
+      const openUrl = `http://localhost:${portStr}`;
+      setTimeout(() => {
+        try {
+          const platform = process.platform;
+          if (platform === "darwin") execFileSync("open", [openUrl], { stdio: "ignore" });
+          else if (platform === "win32") execFileSync("cmd", ["/c", "start", "", openUrl], { stdio: "ignore" });
+          else {
+            try {
+              execFileSync("xdg-open", [openUrl], { stdio: "ignore" });
+            } catch {
+              execFileSync("wslview", [openUrl], { stdio: "ignore" });
+            }
+          }
+        } catch {
+          // Browser open is best-effort
+        }
+      }, 3000);
+
+      // Build and serve (no shell — npx is invoked directly)
+      const child = spawnProc(
+        "npx", ["quartz", "build", "--serve", "--port", portStr, "--directory", wikiDir],
+        { cwd: quartzDir, stdio: "inherit" }
+      );
+
+      child.on("error", (err) => {
+        console.error(`Error: Failed to start Quartz — ${err.message}`);
+        process.exit(1);
+      });
+
+      child.on("exit", (code) => {
+        process.exit(code ?? 0);
+      });
+    });
+
   // ── status ──────────────────────────────────────────────────
 
   program
