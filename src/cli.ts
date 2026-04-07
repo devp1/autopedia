@@ -93,7 +93,7 @@ export function createCli(): Command {
   program
     .name("autopedia")
     .description("Personal knowledge wiki maintained by your AI tool via MCP")
-    .version("0.3.0");
+    .version("0.4.0");
 
   // ── init ────────────────────────────────────────────────────
 

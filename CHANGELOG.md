@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.4.0
+
+### Knowledge Graph
+- `/graph` route: interactive force-directed SVG visualization of wiki page connections
+- Per-page backlinks: "Linked from" section on every wiki page
+- Shared wikilink extraction in `wiki.ts` (extractLinks, buildGraph, getBacklinks)
+
+### Filesystem Scan
+- `autopedia scan` CLI command: detects files added via Obsidian, IDE, or drag-and-drop
+- `get_status` MCP tool reports untracked file count automatically
+- System prompt instructs AI to offer processing when untracked files detected
+
+### Dashboard Polish
+- Pinned index as "Home" at top of sidebar
+- Source titles extracted from content headings (not raw slugs)
+- YAML frontmatter stripped before rendering
+- Mobile layout fix (no blank content)
+- Breadcrumb navigation on wiki and source pages
+- Getting-started card for empty wikis
+- Dark mode stat card visibility improved
+- XSS hardening: link text escaped, graph JSON escaped with \u003c/\u003e
+
+### Tests
+- 215 tests (up from 186)
+
 ## v0.3.0
 
 ### Quick Capture

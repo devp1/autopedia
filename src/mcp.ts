@@ -47,7 +47,7 @@ export function createServer(kbRoot: string): McpServer {
 
   const server = new McpServer({
     name: "autopedia",
-    version: "0.3.0",
+    version: "0.4.0",
   });
 
   // ── INGEST: add_source ──────────────────────────────────────
