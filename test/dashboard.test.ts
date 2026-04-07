@@ -228,7 +228,7 @@ describe("Dashboard server", () => {
 
   // ── Display name helper ────────────────────────────────────
 
-  it("displayName strips date prefix, base36 timestamp, and replaces hyphens", () => {
+  it("displayName strips date, timestamp, index, extension, and replaces hyphens", () => {
     // Date + base36 timestamp (CLI-generated slugs)
     expect(displayName("2026-04-07-mnnzg4ak-karpathy-github-io")).toBe("karpathy github io");
     expect(displayName("2026-04-07-mnp1589w-the-karpathy-pattern")).toBe("the karpathy pattern");
@@ -236,8 +236,12 @@ describe("Dashboard server", () => {
     expect(displayName("2024-01-01-example-com")).toBe("example com");
     // No date prefix
     expect(displayName("simple-slug")).toBe("simple slug");
-    // File extension stripping
+    // File extension stripping (any extension)
     expect(displayName("2026-04-07-my-article.md")).toBe("my article");
+    expect(displayName("2026-04-07-mnp8ec0a-diagram.png")).toBe("diagram");
+    expect(displayName("2026-04-07-mnp8ec0a-2-report.pdf")).toBe("report");
+    // Folder ingestion index prefix stripped
+    expect(displayName("2026-04-07-mnp8ec0a-1-notes")).toBe("notes");
     // All-letter segments preserved (not mistaken for timestamp)
     expect(displayName("2026-04-07-karpathy-github-io")).toBe("karpathy github io");
   });

@@ -554,7 +554,8 @@ export function displayName(slug: string): string {
   return slug
     .replace(/^\d{4}-\d{2}-\d{2}-/, "") // strip date prefix
     .replace(/^(?=[a-z0-9]*\d)[a-z0-9]{7,9}-/, "") // strip base36 timestamp (has digit, 7-9 chars)
-    .replace(/\.(md|txt|pdf)$/, "")
+    .replace(/^\d+-/, "") // strip folder-ingestion index prefix (e.g. "2-report" → "report")
+    .replace(/\.[a-z0-9]+$/i, "") // strip any file extension
     .replace(/-/g, " ");
 }
 
@@ -587,7 +588,7 @@ function buildSidebar(data: SidebarData): string {
     ? data.sources.map(s => {
         const name = s.replace(/\.md$/, "");
         const isActive = data.activePath === `/sources/${name}`;
-        const title = data.sourceTitles.get(name) || displayName(name);
+        const title = data.sourceTitles.get(s) || displayName(name);
         return `<li><a href="/sources/${encodeURIComponent(name)}" class="${isActive ? "active" : ""}" title="${escapeHtml(name)}">${escapeHtml(title)}</a></li>`;
       }).join("\n")
     : `<li><span class="empty" style="padding:4px 28px;font-size:13px;">No sources</span></li>`;
@@ -648,13 +649,18 @@ function renderPage(title: string, bodyHtml: string, sidebar: SidebarData): stri
 function buildSourceTitles(kbRoot: string, sources: string[]): Map<string, string> {
   const titles = new Map<string, string>();
   for (const s of sources) {
-    const slug = s.replace(/\.md$/, "");
-    const content = readSource(kbRoot, slug);
-    if (content) {
-      const heading = content.match(/^#\s+(.+)$/m);
-      if (heading) { titles.set(slug, heading[1].slice(0, 60)); continue; }
+    const slug = s.replace(/\.[^.]+$/, ""); // strip any extension
+    const isText = /\.(md|txt|text)$/i.test(s);
+
+    // Only extract headings from text sources — binary metadata headings are just filenames
+    if (isText) {
+      const content = readSource(kbRoot, s);
+      if (content) {
+        const heading = content.match(/^#\s+(.+)$/m);
+        if (heading) { titles.set(s, heading[1].slice(0, 60)); continue; }
+      }
     }
-    titles.set(slug, displayName(slug));
+    titles.set(s, displayName(slug));
   }
   return titles;
 }
