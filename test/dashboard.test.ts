@@ -4,7 +4,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as http from "node:http";
 import { Wiki } from "../src/wiki.js";
-import { createDashboard } from "../src/dashboard.js";
+import { createDashboard, displayName } from "../src/dashboard.js";
 
 function request(server: http.Server, urlPath: string): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
@@ -127,6 +127,15 @@ describe("Dashboard server", () => {
     expect(body).not.toContain("<script>alert('xss')</script>");
   });
 
+  it("escapes HTML in link text to prevent XSS", async () => {
+    const wiki = new Wiki(kbRoot);
+    wiki.writePage("link-xss.md", '# Test\n\n[<img src=x onerror=alert(1)>](https://example.com)');
+
+    const { body } = await request(server, "/wiki/link-xss");
+    expect(body).not.toContain("<img src=x onerror");
+    expect(body).toContain("&lt;img");
+  });
+
   it("blocks javascript: links in markdown content", async () => {
     const wiki = new Wiki(kbRoot);
     wiki.writePage("js-link.md", "# Test\n\n[click me](javascript:alert(1))");
@@ -193,5 +202,83 @@ describe("Dashboard server", () => {
     const { status, body } = await request(server, "/sources/does-not-exist");
     expect(status).toBe(404);
     expect(body).toContain("not found");
+  });
+
+  // ── Frontmatter stripping ──────────────────────────────────
+
+  it("strips YAML frontmatter from rendered pages", async () => {
+    const wiki = new Wiki(kbRoot);
+    wiki.writePage("fm-test.md", "---\ntitle: My Title\ntags: [a, b]\n---\n# Actual Content\n\nBody text.");
+
+    const { body } = await request(server, "/wiki/fm-test");
+    expect(body).not.toContain("title: My Title");
+    expect(body).not.toContain("tags: [a, b]");
+    expect(body).toContain("Actual Content");
+    expect(body).toContain("Body text");
+  });
+
+  it("strips YAML frontmatter with \\r\\n line endings", async () => {
+    const wiki = new Wiki(kbRoot);
+    wiki.writePage("crlf-test.md", "---\r\ntitle: CRLF Test\r\n---\r\n# CRLF Content\r\n");
+
+    const { body } = await request(server, "/wiki/crlf-test");
+    expect(body).not.toContain("title: CRLF Test");
+    expect(body).toContain("CRLF Content");
+  });
+
+  // ── Display name helper ────────────────────────────────────
+
+  it("displayName strips date prefix and replaces hyphens", () => {
+    expect(displayName("2026-04-07-gpu-pricing")).toBe("gpu pricing");
+    expect(displayName("2024-01-01-example-com")).toBe("example com");
+    expect(displayName("simple-slug")).toBe("simple slug");
+    expect(displayName("2026-04-07-my-article.md")).toBe("my article");
+  });
+
+  // ── Breadcrumb navigation ──────────────────────────────────
+
+  it("wiki pages include breadcrumb navigation", async () => {
+    const { body } = await request(server, "/wiki/test-topic");
+    expect(body).toContain("breadcrumb");
+    expect(body).toContain('href="/"');
+    expect(body).toContain("test-topic");
+  });
+
+  it("source detail pages include breadcrumb navigation", async () => {
+    const { body } = await request(server, "/sources/2024-01-01-example-com");
+    expect(body).toContain("breadcrumb");
+    expect(body).toContain('href="/sources"');
+  });
+
+  // ── Better empty state ─────────────────────────────────────
+
+  it("empty wiki shows getting-started guide instead of bare message", async () => {
+    // Create a fresh kb with no wiki pages beyond index
+    const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), "autopedia-empty-"));
+    const emptyKb = path.join(emptyDir, ".autopedia");
+    const emptyWiki = new Wiki(emptyKb);
+    emptyWiki.init();
+
+    // Remove the default index.md to simulate truly empty
+    const indexPath = path.join(emptyKb, "wiki", "index.md");
+    if (fs.existsSync(indexPath)) fs.unlinkSync(indexPath);
+
+    const emptyServer = createDashboard(emptyKb);
+    await new Promise<void>((resolve) => emptyServer.listen(0, resolve));
+
+    const { body } = await request(emptyServer, "/");
+    expect(body).toContain("getting-started");
+    expect(body).toContain("autopedia add");
+
+    await new Promise<void>((resolve) => emptyServer.close(() => resolve()));
+    fs.rmSync(emptyDir, { recursive: true, force: true });
+  });
+
+  // ── Display names in sidebar and source list ───────────────
+
+  it("sidebar shows clean display names for sources", async () => {
+    const { body } = await request(server, "/");
+    // The sidebar should show "example com" (display name) instead of the full slug
+    expect(body).toContain("example com");
   });
 });

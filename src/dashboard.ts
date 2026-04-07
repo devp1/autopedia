@@ -34,7 +34,7 @@ const markedInstance = new Marked({
     },
     link({ href, text }: { href: string; text: string }) {
       const safeHref = sanitizeHref(href);
-      return `<a href="${escapeHtml(safeHref)}">${text}</a>`;
+      return `<a href="${escapeHtml(safeHref)}">${escapeHtml(text)}</a>`;
     },
     image({ href, text }: { href: string; text: string }) {
       const safeHref = sanitizeHref(href);
@@ -44,8 +44,10 @@ const markedInstance = new Marked({
 });
 
 function renderMarkdown(content: string): string {
+  // Strip YAML frontmatter (---\n...\n---) before rendering — handles \r\n too
+  const stripped = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
   // First: render markdown to HTML (raw HTML is escaped by our custom renderer)
-  const html = markedInstance.parse(content, { async: false }) as string;
+  const html = markedInstance.parse(stripped, { async: false }) as string;
   // Then: convert [[wikilinks]] to clickable links in the rendered HTML
   return html.replace(
     /\[\[([^\]]+)\]\]/g,
@@ -323,6 +325,28 @@ body {
 
 .wikilink:hover { border-bottom-style: solid; }
 
+/* ── Breadcrumb ────────────────────────── */
+
+.breadcrumb {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.breadcrumb a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: all 0.15s;
+}
+
+.breadcrumb a:hover {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.breadcrumb .separator { margin: 0 6px; }
+
 /* ── Empty state ────────────────────────── */
 
 .empty {
@@ -330,6 +354,31 @@ body {
   padding: 32px 0;
   font-size: 15px;
   line-height: 1.7;
+}
+
+/* ── Getting started card ──────────────── */
+
+.getting-started {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 28px 32px;
+  margin-top: 20px;
+  box-shadow: var(--shadow);
+}
+
+.getting-started h2 {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  margin: 0 0 12px;
+  border: none;
+  padding: 0;
+}
+
+.getting-started p {
+  color: var(--text-secondary);
+  margin-bottom: 16px;
 }
 
 /* ── Source list ─────────────────────────── */
@@ -375,6 +424,12 @@ body {
   padding: 20px 24px;
   box-shadow: var(--shadow);
 }
+
+@media (prefers-color-scheme: dark) {
+  .stat-card { border-color: #333; }
+}
+
+[data-theme="dark"] .stat-card { border-color: #333; }
 
 .stat-card .label {
   font-size: 11px;
@@ -424,7 +479,7 @@ body {
   }
   .sidebar li a.active { background: var(--accent); color: #fff; border-left: none; }
 
-  .content { padding: 24px 16px 48px; }
+  .content { padding: 24px 16px 48px; overflow-y: visible; }
   .content h1 { font-size: 26px; }
   .content h2 { font-size: 19px; }
 }
@@ -470,6 +525,15 @@ const THEME_SCRIPT = `
 </style>
 `;
 
+// ── Display name helper ─────────────────────────────────────────
+
+export function displayName(slug: string): string {
+  return slug
+    .replace(/^\d{4}-\d{2}-\d{2}-/, "") // strip date prefix
+    .replace(/\.(md|txt|pdf)$/, "")
+    .replace(/-/g, " ");
+}
+
 // ── Page template ───────────────────────────────────────────────
 
 interface SidebarData {
@@ -492,7 +556,7 @@ function buildSidebar(data: SidebarData): string {
     ? data.sources.map(s => {
         const name = s.replace(/\.md$/, "");
         const isActive = data.activePath === `/sources/${name}`;
-        return `<li><a href="/sources/${encodeURIComponent(name)}" class="${isActive ? "active" : ""}">${escapeHtml(name)}</a></li>`;
+        return `<li><a href="/sources/${encodeURIComponent(name)}" class="${isActive ? "active" : ""}" title="${escapeHtml(name)}">${escapeHtml(displayName(name))}</a></li>`;
       }).join("\n")
     : `<li><span class="empty" style="padding:4px 28px;font-size:13px;">No sources</span></li>`;
 
@@ -595,7 +659,8 @@ function handleWikiPage(wiki: Wiki, kbRoot: string, pageName: string): { html: s
     return { html: renderPage("Not Found", `<h1>Page not found</h1><p class="empty">${escapeHtml(pageName)} does not exist.</p>`, sidebar), status: 404 };
   }
 
-  return { html: renderPage(pageName, renderMarkdown(content), sidebar), status: 200 };
+  const breadcrumb = `<nav class="breadcrumb"><a href="/">Wiki</a><span class="separator">/</span><span>${escapeHtml(pageName)}</span></nav>`;
+  return { html: renderPage(pageName, breadcrumb + renderMarkdown(content), sidebar), status: 200 };
 }
 
 function handleIndex(wiki: Wiki, kbRoot: string): string {
@@ -603,7 +668,16 @@ function handleIndex(wiki: Wiki, kbRoot: string): string {
   const content = wiki.readPage("index.md");
 
   if (!content || content.trim() === "") {
-    return renderPage("Wiki", `<h1>autopedia</h1><p class="empty">No pages yet. Start a conversation with your AI tool.</p>`, sidebar);
+    const gettingStarted = `<h1>autopedia</h1>
+      <div class="getting-started">
+        <h2>Welcome to your wiki</h2>
+        <p>Start by adding sources — your AI tool will build wiki pages from them.</p>
+        <pre><code>autopedia add "your thought here"
+autopedia add https://example.com/article
+autopedia add ~/research/notes.md</code></pre>
+        <p>Then connect your AI tool — it will process your queue and build wiki pages automatically.</p>
+      </div>`;
+    return renderPage("Wiki", gettingStarted, sidebar);
   }
 
   return renderPage("Wiki", renderMarkdown(content), sidebar);
@@ -619,7 +693,7 @@ function handleSources(wiki: Wiki, kbRoot: string): string {
 
   const list = sources.map(s => {
     const name = s.replace(/\.md$/, "");
-    return `<li><a href="/sources/${encodeURIComponent(name)}">${escapeHtml(name)}</a></li>`;
+    return `<li><a href="/sources/${encodeURIComponent(name)}" title="${escapeHtml(name)}">${escapeHtml(displayName(name))}</a></li>`;
   }).join("\n");
 
   return renderPage("Sources", `<h1>Sources</h1><ul class="source-list">${list}</ul>`, sidebar);
@@ -633,7 +707,8 @@ function handleSourceDetail(wiki: Wiki, kbRoot: string, slug: string): { html: s
     return { html: renderPage("Not Found", `<h1>Source not found</h1><p class="empty">${escapeHtml(slug)} does not exist.</p>`, sidebar), status: 404 };
   }
 
-  return { html: renderPage(slug, renderMarkdown(content), sidebar), status: 200 };
+  const breadcrumb = `<nav class="breadcrumb"><a href="/sources">Sources</a><span class="separator">/</span><span>${escapeHtml(displayName(slug))}</span></nav>`;
+  return { html: renderPage(displayName(slug), breadcrumb + renderMarkdown(content), sidebar), status: 200 };
 }
 
 function handleStatus(wiki: Wiki, kbRoot: string): string {
@@ -649,7 +724,11 @@ function handleStatus(wiki: Wiki, kbRoot: string): string {
   const recentLog = logLines.slice(-10);
 
   const queueHtml = unprocessed.length > 0
-    ? `<ul>${unprocessed.map(u => `<li>${escapeHtml(u)}</li>`).join("")}</ul>`
+    ? `<ul>${unprocessed.map(u => {
+        // URLs and prefixed entries (note:, file:) stay as-is; only slugs get displayName
+        const label = u.startsWith("http") || u.includes(":") ? u : displayName(u);
+        return `<li title="${escapeHtml(u)}">${escapeHtml(label)}</li>`;
+      }).join("")}</ul>`
     : `<p class="empty">All caught up.</p>`;
 
   const logHtml = recentLog.length > 0
