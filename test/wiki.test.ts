@@ -249,4 +249,81 @@ describe("Wiki CRUD operations", () => {
       expect(remaining).not.toContain("https://example.com/article");
     });
   });
+
+  // ── Link extraction & graph ──────────────────────────────────
+
+  describe("extractLinks()", () => {
+    it("returns wikilink targets from page content", () => {
+      wiki.writePage("linked.md", "# Test\n\nSee [[page-a]] and [[page-b]].");
+      const links = wiki.extractLinks("linked.md");
+      expect(links).toEqual(["page-a", "page-b"]);
+    });
+
+    it("skips wikilinks inside code blocks", () => {
+      wiki.writePage("code.md", "# Test\n\n```\n[[not-a-link]]\n```\n\n[[real-link]]");
+      const links = wiki.extractLinks("code.md");
+      expect(links).toEqual(["real-link"]);
+    });
+
+    it("returns empty array for page with no links", () => {
+      wiki.writePage("plain.md", "# No links here");
+      expect(wiki.extractLinks("plain.md")).toEqual([]);
+    });
+  });
+
+  describe("buildGraph()", () => {
+    it("returns nodes and edges from wikilinks", () => {
+      wiki.writePage("a.md", "# A\n\nSee [[b]].");
+      wiki.writePage("b.md", "# B\n\nSee [[a]].");
+      const graph = wiki.buildGraph();
+      expect(graph.nodes).toContain("a");
+      expect(graph.nodes).toContain("b");
+      expect(graph.edges).toContainEqual({ source: "a", target: "b" });
+      expect(graph.edges).toContainEqual({ source: "b", target: "a" });
+    });
+
+    it("normalizes .md suffix in link targets", () => {
+      wiki.writePage("c.md", "# C\n\n[[d.md]]");
+      wiki.writePage("d.md", "# D");
+      const graph = wiki.buildGraph();
+      expect(graph.edges).toContainEqual({ source: "c", target: "d" });
+    });
+  });
+
+  describe("getBacklinks()", () => {
+    it("finds pages that link to a given page", () => {
+      wiki.writePage("src.md", "# Src\n\n[[target]]");
+      wiki.writePage("target.md", "# Target");
+      expect(wiki.getBacklinks("target")).toEqual(["src"]);
+    });
+
+    it("returns empty array when no backlinks exist", () => {
+      wiki.writePage("lonely.md", "# Lonely page");
+      expect(wiki.getBacklinks("lonely")).toEqual([]);
+    });
+  });
+
+  // ── Scan untracked ──────────────────────────────────────────
+
+  describe("scanUntracked()", () => {
+    it("detects files not in queue or log", () => {
+      // Write a source file directly (simulating Obsidian drop)
+      const notesDir = path.join(tmpDir, "sources", "user", "notes");
+      fs.writeFileSync(path.join(notesDir, "dropped-note.md"), "# Dropped via Obsidian");
+      const untracked = wiki.scanUntracked();
+      expect(untracked).toContainEqual({ file: "dropped-note", dir: "user" });
+    });
+
+    it("ignores files already in queue", () => {
+      wiki.addToQueue("note:tracked-file");
+      const notesDir = path.join(tmpDir, "sources", "user", "notes");
+      fs.writeFileSync(path.join(notesDir, "tracked-file.md"), "# Tracked");
+      const untracked = wiki.scanUntracked();
+      expect(untracked.find(u => u.file === "tracked-file")).toBeUndefined();
+    });
+
+    it("returns empty when all files are tracked", () => {
+      expect(wiki.scanUntracked()).toEqual([]);
+    });
+  });
 });

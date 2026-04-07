@@ -303,6 +303,32 @@ export function createCli(): Command {
       }
     });
 
+  // ── scan ───────────────────────────────────────────────────
+
+  program
+    .command("scan")
+    .description("Detect files added outside autopedia (via Obsidian, IDE, etc.) and queue them")
+    .option("-d, --dir <path>", "Path to .autopedia/ directory")
+    .action(async (opts: { dir?: string }) => {
+      const kbRoot = resolveKbRoot(opts.dir);
+      requireKbRoot(kbRoot);
+
+      const wiki = new Wiki(kbRoot);
+      const untracked = wiki.scanUntracked();
+
+      if (untracked.length === 0) {
+        console.log("All files tracked. Nothing new to queue.");
+        return;
+      }
+
+      console.log(`Found ${untracked.length} new file(s):`);
+      for (const { file, dir } of untracked) {
+        const entry = dir === "user" ? `note:${file}` : file;
+        wiki.addToQueue(entry);
+        console.log(`  + sources/${dir === "user" ? "user/notes" : "agent"}/${file}.md → queued as ${entry}`);
+      }
+    });
+
   // ── search ─────────────────────────────────────────────────
 
   program

@@ -373,6 +373,7 @@ export function createServer(kbRoot: string): McpServer {
       const logLines = logContent.split("\n").filter((l) => l.startsWith("- "));
       const recentLog = logLines.slice(-10);
       const unprocessed = wiki.listUnprocessedSources();
+      const untracked = wiki.scanUntracked();
 
       return {
         content: [
@@ -385,6 +386,12 @@ export function createServer(kbRoot: string): McpServer {
                 recent_log: recentLog,
                 unprocessed_sources: unprocessed.length,
                 unprocessed_items: unprocessed,
+                untracked_files: untracked.length,
+                ...(untracked.length > 0
+                  ? {
+                      untracked_hint: `${untracked.length} file(s) detected outside the queue. Run "autopedia scan" or ask me to process them.`,
+                    }
+                  : {}),
               },
               null,
               2
@@ -405,7 +412,7 @@ export function createServer(kbRoot: string): McpServer {
       const pages = wiki.listPages();
       const findings: string[] = [];
 
-      // Build inlink map
+      // Build inlink map using shared wiki.extractLinks()
       const inlinks = new Map<string, string[]>();
       const pageContents = new Map<string, string>();
 
@@ -414,12 +421,7 @@ export function createServer(kbRoot: string): McpServer {
         if (!content) continue;
         pageContents.set(page, content);
 
-        // Find wikilinks [[page-name]]
-        const linkPattern = /\[\[([^\]]+)\]\]/g;
-        let match;
-        while ((match = linkPattern.exec(content)) !== null) {
-          const target = match[1];
-          // Try to resolve the link to a page path
+        for (const target of wiki.extractLinks(page)) {
           const targetPath = target.endsWith(".md") ? target : `${target}.md`;
           if (!inlinks.has(targetPath)) {
             inlinks.set(targetPath, []);
@@ -484,20 +486,12 @@ export function createServer(kbRoot: string): McpServer {
         }
       }
 
-      // Strip fenced code blocks to avoid false positives from example syntax
-      function stripCodeBlocks(text: string): string {
-        return text.replace(/```[\s\S]*?```/g, "");
-      }
-
       // Check for broken wikilinks (links to pages that don't exist)
       const pageSet = new Set(pages);
       const brokenLinkTargets = new Set<string>();
-      for (const [page, content] of pageContents) {
-        const stripped = stripCodeBlocks(content);
-        const linkPattern = /\[\[([^\]]+)\]\]/g;
-        let match;
-        while ((match = linkPattern.exec(stripped)) !== null) {
-          const target = match[1];
+      for (const page of pages) {
+        const targets = wiki.extractLinks(page);
+        for (const target of targets) {
           const targetPath = target.endsWith(".md") ? target : `${target}.md`;
           if (!pageSet.has(targetPath)) {
             findings.push(`broken-link: ${page} links to [[${target}]] which does not exist`);
@@ -512,13 +506,7 @@ export function createServer(kbRoot: string): McpServer {
         if (page === "index.md") continue;
         const contentLines = content.split(/\r?\n/).filter((l) => l.trim() && !l.startsWith("#"));
         if (contentLines.length < 5) continue; // stubs/redirects exempt
-        const stripped = stripCodeBlocks(content);
-        const outbound = new Set<string>();
-        const linkPattern = /\[\[([^\]]+)\]\]/g;
-        let match;
-        while ((match = linkPattern.exec(stripped)) !== null) {
-          outbound.add(match[1]);
-        }
+        const outbound = new Set(wiki.extractLinks(page));
         if (outbound.size < 2) {
           findings.push(
             `low-crossref: ${page} has ${outbound.size} outbound wikilink(s) — needs at least 2`

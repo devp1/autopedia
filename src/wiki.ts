@@ -243,6 +243,54 @@ export class Wiki {
     fs.copyFileSync(sourcePath, resolved);
   }
 
+  // ── Link extraction & graph ────────────────────────────────────
+
+  /** Extract [[wikilink]] targets from a page (skips fenced code blocks) */
+  extractLinks(pagePath: string): string[] {
+    const content = this.readPage(pagePath);
+    if (!content) return [];
+    const stripped = content.replace(/```[\s\S]*?```/g, "");
+    const targets: string[] = [];
+    const pattern = /\[\[([^\]]+)\]\]/g;
+    let match;
+    while ((match = pattern.exec(stripped)) !== null) {
+      targets.push(match[1]);
+    }
+    return targets;
+  }
+
+  /** Build a full graph of wiki pages and their wikilink edges */
+  buildGraph(): { nodes: string[]; edges: { source: string; target: string }[] } {
+    const pages = this.listPages();
+    const nodes = pages.map((p) => p.replace(/\.md$/, ""));
+    const edges: { source: string; target: string }[] = [];
+    for (const page of pages) {
+      const source = page.replace(/\.md$/, "");
+      for (const raw of this.extractLinks(page)) {
+        const target = raw.replace(/\.md$/, ""); // normalize [[foo.md]] → foo
+        edges.push({ source, target });
+      }
+    }
+    return { nodes, edges };
+  }
+
+  /** Find pages that link TO the given page name (without .md) */
+  getBacklinks(pageName: string): string[] {
+    const pages = this.listPages();
+    const backlinks: string[] = [];
+    for (const page of pages) {
+      const source = page.replace(/\.md$/, "");
+      if (source === pageName) continue;
+      const targets = this.extractLinks(page).map((t) => t.replace(/\.md$/, ""));
+      if (targets.includes(pageName)) {
+        backlinks.push(source);
+      }
+    }
+    return backlinks.sort();
+  }
+
+  // ── Queue & sources ──────────────────────────────────────────
+
   listUnprocessedSources(): string[] {
     const queuePath = path.join(this.root, "ops", "queue.md");
     if (!fs.existsSync(queuePath)) return [];
@@ -268,6 +316,41 @@ export class Wiki {
     const content = fs.readFileSync(queuePath, "utf-8");
     const updated = content.replace(`- [ ] ${entry}`, `- [x] ${entry}`);
     this.safeWrite("ops/queue.md", updated);
+  }
+
+  /** Find source files not referenced in queue or log (added via Obsidian, IDE, etc.) */
+  scanUntracked(): { file: string; dir: "agent" | "user" }[] {
+    // Collect all known slugs from queue (both processed and unprocessed) and log
+    const knownSlugs = new Set<string>();
+    const opsFiles = ["ops/queue.md", "ops/log.md"];
+    for (const rel of opsFiles) {
+      const filePath = path.join(this.root, rel);
+      if (!fs.existsSync(filePath)) continue;
+      const lines = fs.readFileSync(filePath, "utf-8").split("\n");
+      for (const line of lines) {
+        // Extract slug-like tokens from each line
+        const tokens = line.match(/[a-z0-9][-a-z0-9]{5,}/gi);
+        if (tokens) tokens.forEach((t) => knownSlugs.add(t));
+      }
+    }
+
+    const untracked: { file: string; dir: "agent" | "user" }[] = [];
+    const dirs: { path: string; type: "agent" | "user" }[] = [
+      { path: path.join(this.root, "sources", "agent"), type: "agent" },
+      { path: path.join(this.root, "sources", "user", "notes"), type: "user" },
+    ];
+
+    for (const { path: dirPath, type } of dirs) {
+      if (!fs.existsSync(dirPath)) continue;
+      const files = fs.readdirSync(dirPath).filter((f) => f.endsWith(".md"));
+      for (const file of files) {
+        const slug = file.replace(/\.md$/, "");
+        if (!knownSlugs.has(slug)) {
+          untracked.push({ file: slug, dir: type });
+        }
+      }
+    }
+    return untracked;
   }
 
   // ── Init ──────────────────────────────────────────────────────

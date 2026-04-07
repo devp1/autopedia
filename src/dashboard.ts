@@ -492,6 +492,29 @@ body {
 }
 
 .content { animation: fadeIn 0.25s ease-out; }
+
+/* ── Graph view ────────────────────────── */
+
+.graph-content { max-width: none; }
+.graph-container { width: 100%; height: calc(100vh - 120px); }
+.graph-container svg { width: 100%; height: 100%; }
+
+/* ── Backlinks ─────────────────────────── */
+
+.backlinks { margin-top: 40px; }
+.backlinks h3 {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.backlinks ul { list-style: none; padding: 0; }
+.backlinks li { display: inline; }
+.backlinks li + li::before { content: " · "; color: var(--text-secondary); }
+.backlinks a { font-size: 14px; }
 `;
 
 // ── Theme toggle script (minimal inline JS) ─────────────────────
@@ -530,6 +553,7 @@ const THEME_SCRIPT = `
 export function displayName(slug: string): string {
   return slug
     .replace(/^\d{4}-\d{2}-\d{2}-/, "") // strip date prefix
+    .replace(/^(?=[a-z0-9]*\d)[a-z0-9]{7,9}-/, "") // strip base36 timestamp (has digit, 7-9 chars)
     .replace(/\.(md|txt|pdf)$/, "")
     .replace(/-/g, " ");
 }
@@ -539,24 +563,32 @@ export function displayName(slug: string): string {
 interface SidebarData {
   pages: string[];
   sources: string[];
+  sourceTitles: Map<string, string>;
   queueCount: number;
+  untrackedCount: number;
   activePath: string;
 }
 
 function buildSidebar(data: SidebarData): string {
+  // Pinned index at top, then other pages alphabetically (deduplicated)
+  const indexActive = data.activePath === "/" || data.activePath === "/wiki/index";
+  const indexItem = `<li><a href="/" class="${indexActive ? "active" : ""}">Home</a></li>`;
+  const otherPages = data.pages.filter(p => p !== "index.md");
+  const otherItems = otherPages.map(p => {
+    const name = p.replace(/\.md$/, "");
+    const isActive = data.activePath === `/wiki/${name}`;
+    return `<li><a href="/wiki/${encodeURIComponent(name)}" class="${isActive ? "active" : ""}">${escapeHtml(name)}</a></li>`;
+  }).join("\n");
   const wikiItems = data.pages.length > 0
-    ? data.pages.map(p => {
-        const name = p.replace(/\.md$/, "");
-        const isActive = data.activePath === `/wiki/${name}` || (data.activePath === "/" && p === "index.md");
-        return `<li><a href="/wiki/${encodeURIComponent(name)}" class="${isActive ? "active" : ""}">${escapeHtml(name)}</a></li>`;
-      }).join("\n")
+    ? indexItem + "\n" + otherItems
     : `<li><span class="empty" style="padding:4px 28px;font-size:13px;">No pages yet</span></li>`;
 
   const sourceItems = data.sources.length > 0
     ? data.sources.map(s => {
         const name = s.replace(/\.md$/, "");
         const isActive = data.activePath === `/sources/${name}`;
-        return `<li><a href="/sources/${encodeURIComponent(name)}" class="${isActive ? "active" : ""}" title="${escapeHtml(name)}">${escapeHtml(displayName(name))}</a></li>`;
+        const title = data.sourceTitles.get(name) || displayName(name);
+        return `<li><a href="/sources/${encodeURIComponent(name)}" class="${isActive ? "active" : ""}" title="${escapeHtml(name)}">${escapeHtml(title)}</a></li>`;
       }).join("\n")
     : `<li><span class="empty" style="padding:4px 28px;font-size:13px;">No sources</span></li>`;
 
@@ -565,6 +597,7 @@ function buildSidebar(data: SidebarData): string {
     : "";
 
   const statusActive = data.activePath === "/status" ? " active" : "";
+  const graphActive = data.activePath === "/graph" ? " active" : "";
 
   return `
     <nav class="sidebar">
@@ -582,6 +615,7 @@ function buildSidebar(data: SidebarData): string {
       </div>
       <div class="sidebar-section">
         <h2>System</h2>
+        <a href="/graph" class="sidebar-nav-link${graphActive}">Graph</a>
         <a href="/status" class="sidebar-nav-link${statusActive}">Status${queueBadge}</a>
       </div>
     </nav>
@@ -611,11 +645,27 @@ function renderPage(title: string, bodyHtml: string, sidebar: SidebarData): stri
 
 // ── Route handlers ──────────────────────────────────────────────
 
+function buildSourceTitles(kbRoot: string, sources: string[]): Map<string, string> {
+  const titles = new Map<string, string>();
+  for (const s of sources) {
+    const slug = s.replace(/\.md$/, "");
+    const content = readSource(kbRoot, slug);
+    if (content) {
+      const heading = content.match(/^#\s+(.+)$/m);
+      if (heading) { titles.set(slug, heading[1].slice(0, 60)); continue; }
+    }
+    titles.set(slug, displayName(slug));
+  }
+  return titles;
+}
+
 function getSidebarData(wiki: Wiki, kbRoot: string, activePath: string): SidebarData {
   const pages = wiki.listPages();
   const sources = listAllSources(kbRoot);
+  const sourceTitles = buildSourceTitles(kbRoot, sources);
   const queueCount = wiki.listUnprocessedSources().length;
-  return { pages, sources, queueCount, activePath };
+  const untrackedCount = wiki.scanUntracked().length;
+  return { pages, sources, sourceTitles, queueCount, untrackedCount, activePath };
 }
 
 function listAllSources(kbRoot: string): string[] {
@@ -660,7 +710,11 @@ function handleWikiPage(wiki: Wiki, kbRoot: string, pageName: string): { html: s
   }
 
   const breadcrumb = `<nav class="breadcrumb"><a href="/">Wiki</a><span class="separator">/</span><span>${escapeHtml(pageName)}</span></nav>`;
-  return { html: renderPage(pageName, breadcrumb + renderMarkdown(content), sidebar), status: 200 };
+  const backlinks = wiki.getBacklinks(pageName);
+  const backlinksHtml = backlinks.length > 0
+    ? `<hr><section class="backlinks"><h3>Linked from</h3><ul>${backlinks.map(b => `<li><a href="/wiki/${encodeURIComponent(b)}">${escapeHtml(b)}</a></li>`).join("")}</ul></section>`
+    : "";
+  return { html: renderPage(pageName, breadcrumb + renderMarkdown(content) + backlinksHtml, sidebar), status: 200 };
 }
 
 function handleIndex(wiki: Wiki, kbRoot: string): string {
@@ -740,7 +794,9 @@ function handleStatus(wiki: Wiki, kbRoot: string): string {
     <div class="stat-grid">
       <div class="stat-card"><div class="label">Wiki pages</div><div class="value">${pages.length}</div></div>
       <div class="stat-card"><div class="label">Queued</div><div class="value">${unprocessed.length}</div></div>
+      ${sidebar.untrackedCount > 0 ? `<div class="stat-card"><div class="label">Untracked</div><div class="value">${sidebar.untrackedCount}</div></div>` : ""}
     </div>
+    ${sidebar.untrackedCount > 0 ? `<p class="empty" style="padding:0 0 16px;">💡 ${sidebar.untrackedCount} file(s) added outside autopedia — run <code>autopedia scan</code> to queue them.</p>` : ""}
     <h2>Unprocessed Queue</h2>
     ${queueHtml}
     <h2>Recent Activity</h2>
@@ -748,6 +804,144 @@ function handleStatus(wiki: Wiki, kbRoot: string): string {
   `;
 
   return renderPage("Status", body, sidebar);
+}
+
+function handleGraph(wiki: Wiki, kbRoot: string): string {
+  const sidebar = getSidebarData(wiki, kbRoot, "/graph");
+  const graph = wiki.buildGraph();
+  // Escape </script> and <!-- in JSON to prevent script breakout (XSS)
+  const graphJson = JSON.stringify(graph).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+
+  const graphScript = `
+<script>
+(function() {
+  var data = ${graphJson};
+  var svg = document.getElementById('graph-svg');
+  var rect = svg.getBoundingClientRect();
+  var W = rect.width, H = rect.height;
+  var nodes = data.nodes.map(function(id, i) {
+    return { id: id, x: W/2 + (Math.random()-0.5)*200, y: H/2 + (Math.random()-0.5)*200, vx: 0, vy: 0 };
+  });
+  var nodeMap = {};
+  nodes.forEach(function(n) { nodeMap[n.id] = n; });
+  var edges = data.edges.filter(function(e) { return nodeMap[e.source] && nodeMap[e.target]; });
+
+  var ns = 'http://www.w3.org/2000/svg';
+  var edgeEls = edges.map(function(e) {
+    var el = document.createElementNS(ns, 'line');
+    el.setAttribute('stroke', getComputedStyle(document.documentElement).getPropertyValue('--border').trim());
+    el.setAttribute('stroke-width', '1.5');
+    svg.appendChild(el);
+    return el;
+  });
+  var nodeEls = nodes.map(function(n) {
+    var g = document.createElementNS(ns, 'g');
+    g.style.cursor = 'pointer';
+    var circle = document.createElementNS(ns, 'circle');
+    var r = n.id === 'index' ? 12 : 8;
+    var fill = n.id === 'index'
+      ? getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()
+      : getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim();
+    circle.setAttribute('r', r);
+    circle.setAttribute('fill', fill);
+    var label = document.createElementNS(ns, 'text');
+    label.textContent = n.id;
+    label.setAttribute('dy', -r - 4);
+    label.setAttribute('text-anchor', 'middle');
+    label.setAttribute('fill', getComputedStyle(document.documentElement).getPropertyValue('--text').trim());
+    label.setAttribute('font-size', '12');
+    label.setAttribute('font-family', getComputedStyle(document.documentElement).getPropertyValue('--font-body').trim());
+    g.appendChild(circle);
+    g.appendChild(label);
+    g.addEventListener('click', function() { window.location.href = '/wiki/' + encodeURIComponent(n.id); });
+    svg.appendChild(g);
+    return { g: g, circle: circle, node: n, r: r };
+  });
+
+  // Force simulation
+  var alpha = 1, decay = 0.99, stopped = false;
+  function tick() {
+    if (stopped) return;
+    alpha *= decay;
+    if (alpha < 0.001) { stopped = true; return; }
+    // Repulsion
+    for (var i = 0; i < nodes.length; i++) {
+      for (var j = i+1; j < nodes.length; j++) {
+        var dx = nodes[j].x - nodes[i].x, dy = nodes[j].y - nodes[i].y;
+        var d = Math.sqrt(dx*dx + dy*dy) || 1;
+        var f = 800 / (d * d);
+        nodes[i].vx -= dx/d * f * alpha;
+        nodes[i].vy -= dy/d * f * alpha;
+        nodes[j].vx += dx/d * f * alpha;
+        nodes[j].vy += dy/d * f * alpha;
+      }
+    }
+    // Attraction (edges)
+    edges.forEach(function(e) {
+      var s = nodeMap[e.source], t = nodeMap[e.target];
+      var dx = t.x - s.x, dy = t.y - s.y;
+      var d = Math.sqrt(dx*dx + dy*dy) || 1;
+      var f = (d - 120) * 0.05 * alpha;
+      s.vx += dx/d * f; s.vy += dy/d * f;
+      t.vx -= dx/d * f; t.vy -= dy/d * f;
+    });
+    // Center gravity
+    nodes.forEach(function(n) {
+      n.vx += (W/2 - n.x) * 0.01 * alpha;
+      n.vy += (H/2 - n.y) * 0.01 * alpha;
+      n.vx *= 0.6; n.vy *= 0.6;
+      n.x += n.vx; n.y += n.vy;
+      n.x = Math.max(20, Math.min(W-20, n.x));
+      n.y = Math.max(20, Math.min(H-20, n.y));
+    });
+    // Update DOM
+    edgeEls.forEach(function(el, i) {
+      var s = nodeMap[edges[i].source], t = nodeMap[edges[i].target];
+      el.setAttribute('x1', s.x); el.setAttribute('y1', s.y);
+      el.setAttribute('x2', t.x); el.setAttribute('y2', t.y);
+    });
+    nodeEls.forEach(function(ne) {
+      ne.g.setAttribute('transform', 'translate(' + ne.node.x + ',' + ne.node.y + ')');
+    });
+    requestAnimationFrame(tick);
+  }
+  tick();
+
+  // Drag
+  var dragging = null, dragOff = {x:0,y:0};
+  svg.addEventListener('mousedown', function(e) {
+    for (var i = 0; i < nodeEls.length; i++) {
+      var ne = nodeEls[i], dx = e.offsetX - ne.node.x, dy = e.offsetY - ne.node.y;
+      if (dx*dx + dy*dy < ne.r*ne.r + 100) {
+        dragging = ne.node; dragOff = {x: dx, y: dy};
+        stopped = false; alpha = 0.3;
+        e.preventDefault(); break;
+      }
+    }
+  });
+  svg.addEventListener('mousemove', function(e) {
+    if (!dragging) return;
+    dragging.x = e.offsetX - dragOff.x;
+    dragging.y = e.offsetY - dragOff.y;
+    dragging.vx = 0; dragging.vy = 0;
+    if (stopped) { stopped = false; alpha = 0.1; tick(); }
+  });
+  svg.addEventListener('mouseup', function() { dragging = null; });
+})();
+</script>`;
+
+  const body = `
+    <h1>Knowledge Graph</h1>
+    <div class="graph-container">
+      <svg id="graph-svg"></svg>
+    </div>
+    ${graphScript}
+  `;
+
+  return renderPage("Graph", body, sidebar).replace(
+    '<main class="content">',
+    '<main class="content graph-content">'
+  );
 }
 
 // ── Server factory ──────────────────────────────────────────────
@@ -772,6 +966,8 @@ export function createDashboard(kbRoot: string): http.Server {
       } else if (pathname.startsWith("/sources/")) {
         const slug = pathname.slice(9); // remove "/sources/"
         result = handleSourceDetail(wiki, kbRoot, slug);
+      } else if (pathname === "/graph") {
+        result = { html: handleGraph(wiki, kbRoot), status: 200 };
       } else if (pathname === "/status") {
         result = { html: handleStatus(wiki, kbRoot), status: 200 };
       } else {

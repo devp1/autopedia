@@ -362,6 +362,52 @@ describe("CLI: autopedia view", () => {
   });
 });
 
+// ── scan command tests ──────────────────────────────────────
+
+describe("CLI: autopedia scan", () => {
+  let tmpDir: string;
+  let kbRoot: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "autopedia-scan-"));
+    kbRoot = path.join(tmpDir, ".autopedia");
+    const wiki = new Wiki(kbRoot);
+    wiki.init();
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("detects untracked files via wiki.scanUntracked()", () => {
+    const wiki = new Wiki(kbRoot);
+    // Drop a file directly (simulating Obsidian)
+    fs.writeFileSync(path.join(kbRoot, "sources", "user", "notes", "dropped.md"), "# Dropped");
+    const untracked = wiki.scanUntracked();
+    expect(untracked.length).toBe(1);
+    expect(untracked[0].file).toBe("dropped");
+    expect(untracked[0].dir).toBe("user");
+  });
+
+  it("queues untracked files when scanned", () => {
+    const wiki = new Wiki(kbRoot);
+    fs.writeFileSync(path.join(kbRoot, "sources", "user", "notes", "dropped.md"), "# Dropped");
+    const untracked = wiki.scanUntracked();
+    for (const { file, dir } of untracked) {
+      const entry = dir === "user" ? `note:${file}` : file;
+      wiki.addToQueue(entry);
+    }
+    // Should now be tracked
+    expect(wiki.scanUntracked().length).toBe(0);
+    expect(wiki.listUnprocessedSources()).toContain("note:dropped");
+  });
+
+  it("reports nothing when all files are tracked", () => {
+    const wiki = new Wiki(kbRoot);
+    expect(wiki.scanUntracked()).toEqual([]);
+  });
+});
+
 // ── search command tests ─────────────────────────────────────
 
 describe("CLI: autopedia search", () => {

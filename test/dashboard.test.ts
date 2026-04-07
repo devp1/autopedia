@@ -228,11 +228,18 @@ describe("Dashboard server", () => {
 
   // ── Display name helper ────────────────────────────────────
 
-  it("displayName strips date prefix and replaces hyphens", () => {
-    expect(displayName("2026-04-07-gpu-pricing")).toBe("gpu pricing");
+  it("displayName strips date prefix, base36 timestamp, and replaces hyphens", () => {
+    // Date + base36 timestamp (CLI-generated slugs)
+    expect(displayName("2026-04-07-mnnzg4ak-karpathy-github-io")).toBe("karpathy github io");
+    expect(displayName("2026-04-07-mnp1589w-the-karpathy-pattern")).toBe("the karpathy pattern");
+    // Date only (MCP-generated slugs, no timestamp)
     expect(displayName("2024-01-01-example-com")).toBe("example com");
+    // No date prefix
     expect(displayName("simple-slug")).toBe("simple slug");
+    // File extension stripping
     expect(displayName("2026-04-07-my-article.md")).toBe("my article");
+    // All-letter segments preserved (not mistaken for timestamp)
+    expect(displayName("2026-04-07-karpathy-github-io")).toBe("karpathy github io");
   });
 
   // ── Breadcrumb navigation ──────────────────────────────────
@@ -276,9 +283,65 @@ describe("Dashboard server", () => {
 
   // ── Display names in sidebar and source list ───────────────
 
-  it("sidebar shows clean display names for sources", async () => {
+  it("sidebar shows source title from content heading", async () => {
     const { body } = await request(server, "/");
-    // The sidebar should show "example com" (display name) instead of the full slug
-    expect(body).toContain("example com");
+    // The source "2024-01-01-example-com" has content "# Fetched Article" — should show that
+    expect(body).toContain("Fetched Article");
+  });
+
+  // ── Pinned index ───────────────────────────────────────────
+
+  it("sidebar pins index as Home at top of wiki list", async () => {
+    const { body } = await request(server, "/");
+    expect(body).toContain(">Home<");
+    // Home should come before other pages
+    const homePos = body.indexOf(">Home<");
+    const topicPos = body.indexOf("test-topic");
+    expect(homePos).toBeLessThan(topicPos);
+  });
+
+  it("index is not duplicated in sidebar", async () => {
+    const { body } = await request(server, "/");
+    // Should not appear as a separate sidebar item beyond "Home"
+    expect(body).not.toContain('">index<');
+  });
+
+  // ── Graph route ─────────────────────────────────────────────
+
+  it("GET /graph returns 200 with SVG", async () => {
+    const { status, body } = await request(server, "/graph");
+    expect(status).toBe(200);
+    expect(body).toContain("graph-svg");
+    expect(body).toContain("Knowledge Graph");
+  });
+
+  it("graph data includes wiki page nodes", async () => {
+    const { body } = await request(server, "/graph");
+    expect(body).toContain("test-topic");
+    expect(body).toContain("related-page");
+  });
+
+  // ── Backlinks ───────────────────────────────────────────────
+
+  it("wiki pages show backlinks section", async () => {
+    // test-topic links to related-page, so related-page should show backlink from test-topic
+    const { body } = await request(server, "/wiki/related-page");
+    expect(body).toContain("Linked from");
+    expect(body).toContain("test-topic");
+  });
+
+  it("wiki pages with no backlinks skip backlinks section", async () => {
+    const wiki = new Wiki(kbRoot);
+    wiki.writePage("orphan.md", "# Orphan\n\nNo one links here.");
+    const { body } = await request(server, "/wiki/orphan");
+    expect(body).not.toContain("Linked from");
+  });
+
+  // ── Graph link in sidebar ──────────────────────────────────
+
+  it("sidebar includes Graph link", async () => {
+    const { body } = await request(server, "/");
+    expect(body).toContain('href="/graph"');
+    expect(body).toContain("Graph");
   });
 });

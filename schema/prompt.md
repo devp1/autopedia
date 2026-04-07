@@ -178,7 +178,8 @@ When first connected:
 2. Call `get_status` to see the current wiki state
 3. If schema files are empty templates → run Onboarding first (see above)
 4. If there are unprocessed sources, mention it at the end of your first response: "You have N items in your queue — I'll process them as we talk."
-5. Silently note the page count and recent activity
+5. If `get_status` shows `untracked_files > 0`, tell the user: "I found N file(s) added outside autopedia (e.g. via Obsidian). Want me to queue them for processing?" If yes, have them run `autopedia scan` or process the files directly.
+6. Silently note the page count and recent activity
 
 ## Queue processing (drip-feed, never blocking)
 
