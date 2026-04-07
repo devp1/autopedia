@@ -153,6 +153,29 @@ describe("CLI: autopedia init", () => {
     });
   });
 
+  // ── add (URL — instant queue, no fetch) ───────────────────
+
+  describe("add operation (URL — instant queue)", () => {
+    it("queues URL without saving any source file", () => {
+      doInit();
+
+      const wiki = new Wiki(kbRoot);
+      // Simulate what CLI add now does: just validate + queue
+      wiki.addToQueue("https://example.com/some-article");
+
+      const queue = fs.readFileSync(
+        path.join(kbRoot, "ops", "queue.md"),
+        "utf-8"
+      );
+      expect(queue).toContain("- [ ] https://example.com/some-article");
+
+      // No source file should be saved (no fetch happened)
+      const agentDir = path.join(kbRoot, "sources", "agent");
+      const agentFiles = fs.readdirSync(agentDir);
+      expect(agentFiles).toHaveLength(0);
+    });
+  });
+
   // ── status ──────────────────────────────────────────────────
 
   describe("status operation", () => {

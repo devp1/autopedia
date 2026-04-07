@@ -77,6 +77,69 @@ describe("MCP Server", () => {
 
       expect(result.isError).toBe(true);
     });
+
+    // ── capture_mode: queue ─────────────────────────────────────
+
+    it("queue mode with URL: queues without fetching", async () => {
+      const result = await client.callTool({
+        name: "add_source",
+        arguments: {
+          url: "https://example.com/article",
+          capture_mode: "queue",
+        },
+      });
+
+      const data = JSON.parse((result.content as Array<{ text: string }>)[0].text);
+      expect(data.queued).toBe("https://example.com/article");
+      expect(data.message).toContain("queue");
+
+      // Verify it was added to the queue
+      const queuePath = path.join(tmpDir, "ops", "queue.md");
+      const queue = fs.readFileSync(queuePath, "utf-8");
+      expect(queue).toContain("- [ ] https://example.com/article");
+
+      // Verify NO source file was saved (no fetch happened)
+      const agentDir = path.join(tmpDir, "sources", "agent");
+      const agentFiles = fs.readdirSync(agentDir);
+      expect(agentFiles).toHaveLength(0);
+    });
+
+    it("queue mode with text: saves note and queues", async () => {
+      const result = await client.callTool({
+        name: "add_source",
+        arguments: {
+          text: "Quick thought about inference costs",
+          capture_mode: "queue",
+        },
+      });
+
+      const data = JSON.parse((result.content as Array<{ text: string }>)[0].text);
+      expect(data.note_saved).toBe(true);
+      expect(data.queued).toContain("note:");
+
+      // Verify note was saved
+      const notesDir = path.join(tmpDir, "sources", "user", "notes");
+      const files = fs.readdirSync(notesDir);
+      expect(files.length).toBe(1);
+
+      // Verify queue entry
+      const queuePath = path.join(tmpDir, "ops", "queue.md");
+      const queue = fs.readFileSync(queuePath, "utf-8");
+      expect(queue).toContain("- [ ] note:");
+    });
+
+    it("ingest mode (default) returns full synthesis context", async () => {
+      const result = await client.callTool({
+        name: "add_source",
+        arguments: { text: "Full ingest test content" },
+      });
+
+      const data = JSON.parse((result.content as Array<{ text: string }>)[0].text);
+      // Ingest mode returns source_content, index, relevant_pages
+      expect(data.source_content).toBeDefined();
+      expect(data.index).toBeDefined();
+      expect(data.relevant_pages).toBeDefined();
+    });
   });
 
   // ── apply_wiki_ops ────────────────────────────────────────────

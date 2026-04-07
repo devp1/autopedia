@@ -233,4 +233,50 @@ describe("System prompt quality", () => {
       });
     }
   });
+
+  // ── Quick Capture ──────────────────────────────────────────────
+
+  describe("Quick Capture guidance", () => {
+    beforeAll(() => {
+      promptContent = fs.readFileSync(
+        path.join(SCHEMA_DIR, "prompt.md"),
+        "utf-8"
+      );
+    });
+
+    it("has a Quick Capture section", () => {
+      expect(promptContent).toContain("Quick Capture");
+    });
+
+    it("documents capture_mode parameter", () => {
+      expect(promptContent).toContain("capture_mode");
+    });
+
+    it("documents queue mode for instant saves", () => {
+      expect(promptContent).toContain('capture_mode: "queue"');
+    });
+
+    it("documents ingest mode for full processing", () => {
+      expect(promptContent).toContain('capture_mode: "ingest"');
+    });
+
+    it("warns not to capture normal chat", () => {
+      expect(promptContent).toMatch(/don.t capture normal chat/i);
+    });
+  });
+
+  // ── Startup behavior ──────────────────────────────────────────
+
+  describe("Startup behavior", () => {
+    beforeAll(() => {
+      promptContent = fs.readFileSync(
+        path.join(SCHEMA_DIR, "prompt.md"),
+        "utf-8"
+      );
+    });
+
+    it("prioritizes handling user request first", () => {
+      expect(promptContent).toMatch(/handle.*user.*request.*first/i);
+    });
+  });
 });

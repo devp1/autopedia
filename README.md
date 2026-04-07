@@ -105,12 +105,12 @@ These are saved immediately and processed the next time your AI tool connects.
 | Command | What it does |
 |---------|-------------|
 | `autopedia init` | Create `~/.autopedia/` directory structure |
-| `autopedia add <url-or-text>` | Save a source to the queue (processed next session) |
+| `autopedia add <url-or-text>` | Instantly queue a URL or text note (no fetch, no delay) |
 | `autopedia serve` | Start MCP server (used by your AI tool, not run manually) |
 | `autopedia status` | Show wiki page count and unprocessed sources |
 | `autopedia search <query>` | Search wiki pages from the terminal |
 | `autopedia export [--output file.md]` | Export wiki as a single markdown file |
-| `autopedia view` | Browse your wiki locally with [Quartz](https://quartz.jzhao.xyz/) (pinned to v4.5.2) |
+| `autopedia view` | Browse your wiki in a local dashboard |
 
 ## How it works
 
@@ -146,8 +146,8 @@ autopedia implements [Karpathy's three wiki operations](https://x.com/karpathy/s
 
 Your wiki lives at `~/.autopedia/wiki/` as plain markdown with `[[wikilinks]]`.
 
+- **Dashboard** — Run `autopedia view` to open a local dashboard with rendered pages, sources, and queue status. Light/dark theme.
 - **Obsidian** — Open `~/.autopedia/wiki/` as a vault. Graph view, backlinks, and search work out of the box.
-- **Quartz** — Run `autopedia view` to serve your wiki as a local website with search, graph view, and backlinks.
 - **VS Code / any editor** — The files are plain markdown.
 - **Terminal** — `autopedia search <query>` to search, `autopedia export` to dump everything.
 
@@ -160,10 +160,11 @@ Your wiki lives at `~/.autopedia/wiki/` as plain markdown with `[[wikilinks]]`.
 
 ## Dependencies
 
-6 runtime dependencies. No LLM SDK. No database. No Express.
+7 runtime dependencies. No LLM SDK. No database. No Express.
 
 ```
 @modelcontextprotocol/sdk  — MCP protocol
+marked                     — Markdown rendering (dashboard)
 zod                        — Input validation
 @mozilla/readability       — Article extraction (v0.6.0, ReDoS-fixed)
 jsdom                      — DOM for Readability
@@ -178,7 +179,7 @@ git clone https://github.com/devp1/autopedia
 cd autopedia
 npm install
 npm run build
-npm test          # 143 tests
+npm test          # 171 tests
 npm run typecheck # TypeScript strict mode
 npm run lint      # ESLint
 ```
@@ -215,15 +216,12 @@ If you're developing and don't want to `npm link`, use the full path:
 
 ## Roadmap
 
-### v0.3 (next)
-- Sources visibility via curated wiki summary pages
-- View improvements: custom Quartz layout, watch mode
-- Better symlink test coverage on non-Linux platforms
-
-### v0.4 (future)
+### v0.4 (next)
+- Graph visualization in dashboard
 - Claude Code skill alongside MCP (zero-friction entry point)
 - `rules.md` as MCP resource
 - Better duplicate detection in lint
+- Better symlink test coverage on non-Linux platforms
 
 ## License
 

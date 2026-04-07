@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Wiki, validateUrl } from "./wiki.js";
 import { startServer } from "./mcp.js";
-// JSDOM + Readability are lazy-imported in add command (42s load on WSL2+NTFS)
+import { startDashboard } from "./dashboard.js";
 
 // Read schema defaults from package directory (single source of truth)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -59,7 +59,7 @@ export function createCli(): Command {
   program
     .name("autopedia")
     .description("Personal knowledge wiki maintained by your AI tool via MCP")
-    .version("0.2.0");
+    .version("0.3.0");
 
   // ── init ────────────────────────────────────────────────────
 
@@ -107,18 +107,17 @@ export function createCli(): Command {
 
   program
     .command("add <source>")
-    .description("Add a URL or text to the source queue (no LLM call)")
+    .description("Instantly queue a URL or text note (no fetch, no LLM call)")
     .option("-d, --dir <path>", "Path to .autopedia/ directory")
     .action(async (source: string, opts: { dir?: string }) => {
       const kbRoot = resolveKbRoot(opts.dir);
       requireKbRoot(kbRoot);
 
       const wiki = new Wiki(kbRoot);
-      const date = new Date().toISOString().split("T")[0];
       const isUrl = source.startsWith("http://") || source.startsWith("https://");
 
       if (isUrl) {
-        // Validate URL before any network call (SSRF protection)
+        // Validate URL (SSRF protection) — no fetch, just queue
         try {
           validateUrl(source);
         } catch (err) {
@@ -128,50 +127,11 @@ export function createCli(): Command {
           process.exit(1);
         }
 
-        // Fetch and save the content
-        try {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 30000);
-          const response = await fetch(source, {
-            redirect: "error",
-            signal: controller.signal,
-          });
-          clearTimeout(timeout);
-
-          const html = await response.text();
-          if (html.length > 5 * 1024 * 1024) {
-            throw new Error("Response too large (>5MB)");
-          }
-
-          const { JSDOM } = await import("jsdom");
-          const { Readability } = await import("@mozilla/readability");
-          const dom = new JSDOM(html, { url: source });
-          const reader = new Readability(dom.window.document);
-          const article = reader.parse();
-
-          const content = article
-            ? `# ${article.title}\n\nSource: ${source}\n\n${article.textContent}`
-            : `# Fetched from ${source}\n\n${html.slice(0, 5000)}`;
-
-          const ts = Date.now().toString(36);
-          const slug = `${date}-${ts}-${source
-            .replace(/https?:\/\//, "")
-            .replace(/[^a-z0-9]+/gi, "-")
-            .slice(0, 40)}`;
-          wiki.saveAgentSource(slug, content);
-          wiki.addToQueue(source);
-
-          console.log(`✓ Saved source: ${source}`);
-        } catch (err) {
-          // Only queue for retry if URL was valid but fetch failed
-          wiki.addToQueue(source);
-          console.log(`✓ Queued URL (fetch failed, will retry): ${source}`);
-          if (err instanceof Error) {
-            console.log(`  Note: ${err.message}`);
-          }
-        }
+        wiki.addToQueue(source);
+        console.log(`✓ Queued: ${source}`);
       } else {
         // Save as text note (via safe write with symlink validation)
+        const date = new Date().toISOString().split("T")[0];
         const ts = Date.now().toString(36);
         const slug = `${date}-${ts}-${source
           .toLowerCase()
@@ -185,7 +145,7 @@ export function createCli(): Command {
       }
 
       console.log(
-        "  Will be processed next time you use your AI tool with autopedia."
+        "  Will be processed next time your AI tool connects to autopedia."
       );
     });
 
@@ -206,7 +166,7 @@ export function createCli(): Command {
 
   program
     .command("view")
-    .description("Browse your wiki locally with Quartz")
+    .description("Browse your wiki in a local dashboard")
     .option("-p, --port <port>", "Port to serve on", "8080")
     .option("-d, --dir <path>", "Path to .autopedia/ directory")
     .action(async (opts: { port: string; dir?: string }) => {
@@ -216,7 +176,6 @@ export function createCli(): Command {
         console.error("Error: --port must be an integer between 1 and 65535.");
         process.exit(1);
       }
-      const portStr = String(port);
 
       const kbRoot = resolveKbRoot(opts.dir);
       requireKbRoot(kbRoot);
@@ -227,117 +186,18 @@ export function createCli(): Command {
         process.exit(1);
       }
 
-      const quartzDir = path.join(kbRoot, ".quartz");
-      const { execFileSync, spawn: spawnProc } = await import("node:child_process");
+      const server = await startDashboard(kbRoot, port);
+      const address = server.address();
+      const boundPort = typeof address === "object" && address ? address.port : port;
 
-      // Clone Quartz on first run
-      if (!fs.existsSync(quartzDir)) {
-        console.log("Setting up Quartz (first run only)...");
-
-        try {
-          execFileSync("git", ["--version"], { stdio: "ignore" });
-        } catch {
-          console.error("Error: git is required to set up Quartz. Install git and try again.");
-          process.exit(1);
-        }
-
-        const QUARTZ_VERSION = "v4.5.2";
-        console.log(`Cloning Quartz ${QUARTZ_VERSION}...`);
-        execFileSync(
-          "git",
-          ["clone", "--depth", "1", "--branch", QUARTZ_VERSION, "https://github.com/jackyzha0/quartz.git", quartzDir],
-          { stdio: "inherit" }
-        );
-
-        console.log("Installing Quartz dependencies...");
-        execFileSync("npm", ["install"], { cwd: quartzDir, stdio: "inherit" });
-      }
-
-      // Write Quartz config pointing at wiki/
-      const quartzConfig = `import { QuartzConfig } from "./quartz/cfg"
-import * as Plugin from "./quartz/plugins"
-
-const config: QuartzConfig = {
-  configuration: {
-    pageTitle: "autopedia",
-    enableSPA: true,
-    enablePopovers: true,
-    analytics: null,
-    locale: "en-US",
-    baseUrl: "localhost",
-    ignorePatterns: ["private", "templates", ".obsidian"],
-    defaultDateType: "modified",
-    theme: {
-      fontOrigin: "googleFonts",
-      cdnCaching: true,
-      typography: {
-        header: "Schibsted Grotesk",
-        body: "Source Sans Pro",
-        code: "IBM Plex Mono",
-      },
-      colors: {
-        lightMode: {
-          light: "#faf8f8",
-          lightgray: "#e5e5e5",
-          gray: "#b8b8b8",
-          darkgray: "#4e4e4e",
-          dark: "#2b2b2b",
-          secondary: "#284b63",
-          tertiary: "#84a59d",
-          highlight: "rgba(143, 159, 169, 0.15)",
-          textHighlight: "#fff23688",
-        },
-        darkMode: {
-          light: "#161618",
-          lightgray: "#393639",
-          gray: "#646464",
-          darkgray: "#d4d4d4",
-          dark: "#ebebec",
-          secondary: "#7b97aa",
-          tertiary: "#84a59d",
-          highlight: "rgba(143, 159, 169, 0.15)",
-          textHighlight: "#fff23688",
-        },
-      },
-    },
-  },
-  plugins: {
-    transformers: [
-      Plugin.FrontMatter(),
-      Plugin.CreatedModifiedDate({ priority: ["filesystem"] }),
-      Plugin.SyntaxHighlighting(),
-      Plugin.ObsidianFlavoredMarkdown({ enableInHtmlEmbed: false }),
-      Plugin.GitHubFlavoredMarkdown(),
-      Plugin.TableOfContents(),
-      Plugin.CrawlLinks({ markdownLinkResolution: "shortest" }),
-      Plugin.Description(),
-    ],
-    filters: [Plugin.RemoveDrafts()],
-    emitters: [
-      Plugin.AliasRedirects(),
-      Plugin.ComponentResources(),
-      Plugin.ContentPage(),
-      Plugin.FolderPage(),
-      Plugin.TagPage(),
-      Plugin.ContentIndex({ enableSiteMap: false, enableRSS: false }),
-      Plugin.Assets(),
-      Plugin.Static(),
-      Plugin.NotFoundPage(),
-    ],
-  },
-}
-
-export default config
-`;
-      fs.writeFileSync(path.join(quartzDir, "quartz.config.ts"), quartzConfig);
-
-      console.log(`\nServing wiki on http://localhost:${portStr}`);
+      console.log(`\nautopedia dashboard: http://localhost:${boundPort}`);
       console.log("Press Ctrl+C to stop.\n");
 
       // Open browser after a short delay
-      const openUrl = `http://localhost:${portStr}`;
-      setTimeout(() => {
+      const openUrl = `http://localhost:${boundPort}`;
+      setTimeout(async () => {
         try {
+          const { execFileSync } = await import("node:child_process");
           const platform = process.platform;
           if (platform === "darwin") execFileSync("open", [openUrl], { stdio: "ignore" });
           else if (platform === "win32") execFileSync("cmd", ["/c", "start", "", openUrl], { stdio: "ignore" });
@@ -351,22 +211,7 @@ export default config
         } catch {
           // Browser open is best-effort
         }
-      }, 3000);
-
-      // Build and serve (no shell — npx is invoked directly)
-      const child = spawnProc(
-        "npx", ["quartz", "build", "--serve", "--port", portStr, "--directory", wikiDir],
-        { cwd: quartzDir, stdio: "inherit" }
-      );
-
-      child.on("error", (err) => {
-        console.error(`Error: Failed to start Quartz — ${err.message}`);
-        process.exit(1);
-      });
-
-      child.on("exit", (code) => {
-        process.exit(code ?? 0);
-      });
+      }, 500);
     });
 
   // ── status ──────────────────────────────────────────────────

@@ -18,6 +18,7 @@ const WikiOpSchema = z.object({
 const AddSourceInput = z.object({
   url: z.string().url().optional(),
   text: z.string().optional(),
+  capture_mode: z.enum(["queue", "ingest"]).default("ingest"),
 }).refine((data) => data.url || data.text, {
   message: "Either url or text must be provided",
 });
@@ -46,21 +47,61 @@ export function createServer(kbRoot: string): McpServer {
 
   const server = new McpServer({
     name: "autopedia",
-    version: "0.2.0",
+    version: "0.3.0",
   });
 
   // ── INGEST: add_source ──────────────────────────────────────
 
   server.tool(
     "add_source",
-    "Fetch a URL or save text as a source. Returns the source content, relevant wiki pages, and the wiki index for the host LLM to synthesize.",
-    { url: z.string().url().optional(), text: z.string().optional() },
+    "Fetch a URL or save text as a source. Set capture_mode: 'queue' for instant save (no fetch), 'ingest' (default) for full fetch + synthesis context.",
+    {
+      url: z.string().url().optional(),
+      text: z.string().optional(),
+      capture_mode: z.enum(["queue", "ingest"]).default("ingest"),
+    },
     async (args) => {
       const input = AddSourceInput.parse(args);
+      const date = new Date().toISOString().split("T")[0];
+
+      // ── Queue mode: instant capture, no fetch ──────────────────
+      if (input.capture_mode === "queue") {
+        if (input.url) {
+          validateUrl(input.url);
+          wiki.addToQueue(input.url);
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  queued: input.url,
+                  message: "Saved to queue. Will be processed next session or when you say 'process queue'.",
+                }),
+              },
+            ],
+          };
+        } else {
+          const slug = `${date}-${textToSlug(input.text!)}`;
+          wiki.safeWriteNote(slug, input.text!);
+          wiki.addToQueue(`note:${slug}`);
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  queued: `note:${slug}`,
+                  note_saved: true,
+                  message: "Note saved and queued for wiki processing.",
+                }),
+              },
+            ],
+          };
+        }
+      }
+
+      // ── Ingest mode: full fetch + synthesis context ────────────
       let sourceContent: string;
       let slug: string;
-
-      const date = new Date().toISOString().split("T")[0];
 
       if (input.url) {
         // SSRF protection: only allow http/https and reject private IPs
