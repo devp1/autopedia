@@ -6,23 +6,32 @@ Your AI tool (Claude Code, Cursor, etc.) maintains a [Karpathy-style wiki](https
 
 ## Get started
 
-### 1. Install
+### Step 1: Install
 
 ```bash
 npm install -g autopedia
 ```
 
-### 2. Initialize
+### Step 2: Initialize your knowledge base
 
 ```bash
 autopedia init
 ```
 
-This creates `~/.autopedia/` — a global knowledge base that follows you across every project and conversation.
+This creates `~/.autopedia/` with the following structure:
+```
+~/.autopedia/
+  wiki/           ← your synthesized knowledge (AI-maintained)
+  sources/        ← raw inputs (URLs you've saved, text notes)
+  ops/            ← audit trail (log, metrics, queue)
+  schema/         ← your profile and rules
+```
 
-### 3. Add to your AI tool
+### Step 3: Connect to your AI tool
 
-**Claude Code** — add to `~/.claude.json`:
+Add autopedia to your AI tool's MCP configuration. This is a one-time setup.
+
+**Claude Code** — add to `~/.claude.json` under `"mcpServers"`:
 
 ```json
 {
@@ -48,33 +57,60 @@ This creates `~/.autopedia/` — a global knowledge base that follows you across
 }
 ```
 
-### 4. Start a conversation
+### Step 4: Verify it works
 
-On your first session, autopedia's system prompt instructs your AI tool to run an onboarding interview — a few questions about who you are and what you care about. This personalizes everything going forward.
+Start a new conversation in your AI tool. You should see autopedia listed as a connected MCP server. On your first session, it will ask you a few onboarding questions (your name, what you're interested in). This takes about 30 seconds and personalizes everything.
 
-### 5. Use it
+**How to check:** Run `autopedia status` in your terminal. You should see:
+```
+autopedia status
+────────────────────────────────────────
+  Wiki pages:          1
+  Unprocessed sources: 0
+```
 
-**Paste a URL or share a thought** — autopedia ingests it, synthesizes it into wiki pages, and connects it to your existing knowledge:
+If you see this, you're set up correctly. The wiki starts with just `index.md` and grows as you use it.
+
+### Step 5: Start using it
+
+Once connected, just talk to your AI tool naturally:
 
 ```
 You: "Add this to my wiki: https://example.com/gpu-pricing-article"
-AI:  → fetches article → creates/updates wiki pages → links to related topics
+AI:  → fetches the article
+     → extracts key insights
+     → creates/updates wiki pages with [[wikilinks]]
+     → updates the index
 
 You: "What do I know about GPU pricing?"
-AI:  → searches your wiki → answers from YOUR research, not generic training data
+AI:  → searches your wiki
+     → answers from YOUR research, not generic training data
 
 You: "Run a lint check on my wiki"
-AI:  → finds orphan pages, stale content, contradictions → fixes them
+AI:  → finds orphan pages, stale content, contradictions
+     → fixes them automatically
 ```
 
-**Between sessions**, queue things from the terminal:
+**Between sessions**, you can queue things from any terminal:
 
 ```bash
 autopedia add "https://example.com/interesting-article"
 autopedia add "Note: GPU prices dropped 20% this quarter"
 ```
 
-Queued sources are processed the next time your AI tool connects (the system prompt instructs it to check the queue on startup).
+These are saved immediately and processed the next time your AI tool connects.
+
+## CLI Commands
+
+| Command | What it does |
+|---------|-------------|
+| `autopedia init` | Create `~/.autopedia/` directory structure |
+| `autopedia add <url-or-text>` | Save a source to the queue (processed next session) |
+| `autopedia serve` | Start MCP server (used by your AI tool, not run manually) |
+| `autopedia status` | Show wiki page count and unprocessed sources |
+| `autopedia search <query>` | Search wiki pages from the terminal |
+| `autopedia export [--output file.md]` | Export wiki as a single markdown file |
+| `autopedia view` | Browse your wiki locally with [Quartz](https://quartz.jzhao.xyz/) (pinned to v4.5.2) |
 
 ## How it works
 
@@ -106,44 +142,14 @@ autopedia implements [Karpathy's three wiki operations](https://x.com/karpathy/s
 | `autopedia://identity` | Your profile (who you are) |
 | `autopedia://interests` | Your interests (what you care about) |
 
-## CLI Commands
-
-| Command | What it does |
-|---------|-------------|
-| `autopedia init` | Create `~/.autopedia/` directory structure |
-| `autopedia add <url-or-text>` | Save a source to the queue (no LLM call, processed later) |
-| `autopedia serve` | Start MCP server (stdio transport) |
-| `autopedia status` | Show wiki stats and unprocessed sources |
-| `autopedia view` | Browse your wiki locally with [Quartz](https://quartz.jzhao.xyz/) (pinned to v4.5.2) |
-| `autopedia search <query>` | Search wiki pages from the terminal (no MCP session needed) |
-| `autopedia export` | Export wiki as a single markdown file (`--output file.md` or stdout) |
-
 ## Browsing your wiki
 
 Your wiki lives at `~/.autopedia/wiki/` as plain markdown with `[[wikilinks]]`.
 
 - **Obsidian** — Open `~/.autopedia/wiki/` as a vault. Graph view, backlinks, and search work out of the box.
 - **Quartz** — Run `autopedia view` to serve your wiki as a local website with search, graph view, and backlinks.
-- **Any editor** — The files are plain markdown. VS Code, Vim, whatever you prefer.
-
-## On-disk structure
-
-```
-~/.autopedia/
-  wiki/               ← LLM-maintained wiki pages (markdown + wikilinks)
-  wiki/index.md       ← TLDRs and routing table
-  sources/user/       ← Your raw sources (SACRED — never modified by the server)
-  sources/user/notes/ ← Text notes added via CLI
-  sources/agent/      ← Fetched URL content
-  ops/log.md          ← Audit trail of all operations
-  ops/metrics.md      ← Page count and health
-  ops/queue.md        ← Unprocessed source queue
-  schema/identity.md  ← Who you are (set during onboarding)
-  schema/interests.md ← What you care about (set during onboarding)
-  schema/rules.md     ← Your wiki rules
-```
-
-The system prompt (`schema/prompt.md`) is served from the installed package directory via MCP resource, not stored in `~/.autopedia/`. It auto-updates when you upgrade autopedia.
+- **VS Code / any editor** — The files are plain markdown.
+- **Terminal** — `autopedia search <query>` to search, `autopedia export` to dump everything.
 
 ## Security
 
@@ -171,9 +177,40 @@ glob                       — File globbing
 git clone https://github.com/devp1/autopedia
 cd autopedia
 npm install
-npm test          # 139 tests
+npm run build
+npm test          # 143 tests
 npm run typecheck # TypeScript strict mode
 npm run lint      # ESLint
+```
+
+**To test locally without publishing:**
+
+```bash
+# 1. Link the package globally
+npm link
+
+# 2. Initialize
+autopedia init
+
+# 3. Add to Claude Code (~/.claude.json) under "mcpServers":
+#    { "autopedia": { "command": "autopedia", "args": ["serve"] } }
+
+# 4. Start a new Claude Code session — autopedia will connect and interview you
+
+# 5. Verify
+autopedia status
+```
+
+If you're developing and don't want to `npm link`, use the full path:
+```json
+{
+  "mcpServers": {
+    "autopedia": {
+      "command": "node",
+      "args": ["/path/to/autopedia/dist/cli.js", "serve"]
+    }
+  }
+}
 ```
 
 ## Roadmap
