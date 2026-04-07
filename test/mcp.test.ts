@@ -468,6 +468,90 @@ describe("MCP Server", () => {
     });
   });
 
+  describe("complete_onboarding symlink protection", () => {
+    it("rejects when schema/ directory is a symlink", async () => {
+      const schemaDir = path.join(tmpDir, "schema");
+      const fakeTarget = path.join(tmpDir, "fake-schema");
+      fs.mkdirSync(fakeTarget, { recursive: true });
+
+      // Remove real schema dir and replace with symlink
+      fs.rmSync(schemaDir, { recursive: true, force: true });
+      try {
+        fs.symlinkSync(fakeTarget, schemaDir, "dir");
+      } catch {
+        return; // Symlinks not supported on this platform
+      }
+
+      const result = await client.callTool({
+        name: "complete_onboarding",
+        arguments: {
+          identity: "# Identity\n\nTest",
+          interests: "# Interests\n\nTest",
+        },
+      });
+
+      expect(result.isError).toBe(true);
+      const text = (result.content as Array<{ text: string }>)[0].text;
+      expect(text).toContain("schema/ directory is a symlink");
+    });
+
+    it("rejects when identity.md is a symlink", async () => {
+      const schemaDir = path.join(tmpDir, "schema");
+      fs.mkdirSync(schemaDir, { recursive: true });
+
+      const outsideFile = path.join(tmpDir, "outside-identity.md");
+      fs.writeFileSync(outsideFile, "original");
+      const identityPath = path.join(schemaDir, "identity.md");
+      try {
+        fs.symlinkSync(outsideFile, identityPath, "file");
+      } catch {
+        return; // Symlinks not supported
+      }
+
+      const result = await client.callTool({
+        name: "complete_onboarding",
+        arguments: {
+          identity: "# Identity\n\nHacked",
+          interests: "# Interests\n\nTest",
+        },
+      });
+
+      expect(result.isError).toBe(true);
+      const text = (result.content as Array<{ text: string }>)[0].text;
+      expect(text).toContain("is a symlink");
+      // Verify outside file was NOT modified
+      expect(fs.readFileSync(outsideFile, "utf-8")).toBe("original");
+    });
+
+    it("rejects when interests.md is a symlink", async () => {
+      const schemaDir = path.join(tmpDir, "schema");
+      fs.mkdirSync(schemaDir, { recursive: true });
+
+      const outsideFile = path.join(tmpDir, "outside-interests.md");
+      fs.writeFileSync(outsideFile, "original");
+      const interestsPath = path.join(schemaDir, "interests.md");
+      try {
+        fs.symlinkSync(outsideFile, interestsPath, "file");
+      } catch {
+        return; // Symlinks not supported
+      }
+
+      const result = await client.callTool({
+        name: "complete_onboarding",
+        arguments: {
+          identity: "# Identity\n\nTest",
+          interests: "# Interests\n\nHacked",
+        },
+      });
+
+      expect(result.isError).toBe(true);
+      const text = (result.content as Array<{ text: string }>)[0].text;
+      expect(text).toContain("is a symlink");
+      // Verify outside file was NOT modified
+      expect(fs.readFileSync(outsideFile, "utf-8")).toBe("original");
+    });
+  });
+
   // ── read_source ───────────────────────────────────────────────
 
   describe("read_source", () => {
@@ -609,6 +693,29 @@ describe("MCP Server", () => {
       expect(text).toContain("Test User");
     });
 
+    it("returns fallback when identity file is a symlink", async () => {
+      const schemaDir = path.join(tmpDir, "schema");
+      fs.mkdirSync(schemaDir, { recursive: true });
+      const identityPath = path.join(schemaDir, "identity.md");
+      if (fs.existsSync(identityPath)) fs.unlinkSync(identityPath);
+
+      const outsideFile = path.join(tmpDir, "secret.md");
+      fs.writeFileSync(outsideFile, "SECRET DATA");
+      try {
+        fs.symlinkSync(outsideFile, identityPath, "file");
+      } catch {
+        return; // Symlinks not supported
+      }
+
+      const result = await client.readResource({
+        uri: "autopedia://identity",
+      });
+
+      const text = (result.contents[0] as { text: string }).text;
+      expect(text).toContain("No identity configured");
+      expect(text).not.toContain("SECRET DATA");
+    });
+
     it("returns fallback when no identity file exists", async () => {
       const idPath = path.join(tmpDir, "schema", "identity.md");
       if (fs.existsSync(idPath)) fs.unlinkSync(idPath);
@@ -638,6 +745,29 @@ describe("MCP Server", () => {
 
       const text = (result.contents[0] as { text: string }).text;
       expect(text).toContain("Inference costs");
+    });
+
+    it("returns fallback when interests file is a symlink", async () => {
+      const schemaDir = path.join(tmpDir, "schema");
+      fs.mkdirSync(schemaDir, { recursive: true });
+      const interestsPath = path.join(schemaDir, "interests.md");
+      if (fs.existsSync(interestsPath)) fs.unlinkSync(interestsPath);
+
+      const outsideFile = path.join(tmpDir, "secret-interests.md");
+      fs.writeFileSync(outsideFile, "SECRET INTERESTS");
+      try {
+        fs.symlinkSync(outsideFile, interestsPath, "file");
+      } catch {
+        return; // Symlinks not supported
+      }
+
+      const result = await client.readResource({
+        uri: "autopedia://interests",
+      });
+
+      const text = (result.contents[0] as { text: string }).text;
+      expect(text).toContain("No interests configured");
+      expect(text).not.toContain("SECRET INTERESTS");
     });
   });
 });

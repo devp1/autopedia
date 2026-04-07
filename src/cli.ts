@@ -198,8 +198,8 @@ export function createCli(): Command {
     .option("-p, --port <port>", "Port to serve on", "8080")
     .option("-d, --dir <path>", "Path to .autopedia/")
     .action(async (opts: { port: string; dir?: string }) => {
-      // Validate port is a safe integer
-      const port = parseInt(opts.port, 10);
+      // Validate port is a safe integer (strict: reject "123abc", "1.5", etc.)
+      const port = /^\d+$/.test(opts.port) ? Number(opts.port) : NaN;
       if (!Number.isInteger(port) || port < 1 || port > 65535) {
         console.error("Error: --port must be an integer between 1 and 65535.");
         process.exit(1);

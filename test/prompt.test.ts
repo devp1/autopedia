@@ -191,11 +191,13 @@ describe("System prompt quality", () => {
     const tools = [
       "add_source",
       "apply_wiki_ops",
+      "read_source",
       "search",
       "read_page",
       "get_status",
       "lint",
       "question_assumptions",
+      "complete_onboarding",
     ];
 
     beforeAll(() => {
@@ -208,6 +210,26 @@ describe("System prompt quality", () => {
     for (const tool of tools) {
       it(`mentions tool: ${tool}`, () => {
         expect(promptContent).toContain(tool);
+      });
+    }
+  });
+
+  describe("prompt references MCP resources", () => {
+    const resources = [
+      "autopedia://identity",
+      "autopedia://interests",
+    ];
+
+    beforeAll(() => {
+      promptContent = fs.readFileSync(
+        path.join(SCHEMA_DIR, "prompt.md"),
+        "utf-8"
+      );
+    });
+
+    for (const resource of resources) {
+      it(`mentions resource: ${resource}`, () => {
+        expect(promptContent).toContain(resource);
       });
     }
   });

@@ -284,22 +284,32 @@ export class Wiki {
       throw new Error(`Write rejected: target is a symlink`);
     }
 
-    // Walk ancestor directories for symlinks
-    const parentDir = path.dirname(resolved);
-    if (fs.existsSync(parentDir)) {
-      const realParent = fs.realpathSync(parentDir);
-      const expectedDir = allowedDir.slice(0, -1); // strip trailing sep
-      if (
-        realParent !== expectedDir &&
-        !realParent.startsWith(allowedDir)
-      ) {
-        throw new Error(
-          `Write rejected: ancestor directory is a symlink outside allowed path`
-        );
+    // Walk existing ancestors for symlinks BEFORE mkdirSync
+    // This catches symlinks at sources/user even when notes/ doesn't exist yet
+    let ancestor = path.dirname(resolved);
+    while (ancestor.length >= this.root.length) {
+      if (fs.existsSync(ancestor)) {
+        if (fs.lstatSync(ancestor).isSymbolicLink()) {
+          throw new Error(
+            `Write rejected: ancestor directory is a symlink outside allowed path`
+          );
+        }
+        // Once we find an existing non-symlink ancestor, verify realpath
+        const realAncestor = fs.realpathSync(ancestor);
+        if (
+          realAncestor !== this.root &&
+          !realAncestor.startsWith(this.root + path.sep)
+        ) {
+          throw new Error(
+            `Write rejected: ancestor directory is a symlink outside allowed path`
+          );
+        }
+        break;
       }
+      ancestor = path.dirname(ancestor);
     }
 
-    fs.mkdirSync(parentDir, { recursive: true });
+    fs.mkdirSync(path.dirname(resolved), { recursive: true });
     fs.writeFileSync(resolved, content, "utf-8");
   }
 }

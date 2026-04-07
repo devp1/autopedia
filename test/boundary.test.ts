@@ -153,3 +153,93 @@ describe("Sacred boundary enforcement", () => {
     ).toThrow("outside allowed directories");
   });
 });
+
+// ── safeWriteNote boundary enforcement ──────────────────────────
+
+describe("safeWriteNote boundary enforcement", () => {
+  let tmpDir: string;
+  let wiki: Wiki;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "autopedia-notes-"));
+    wiki = new Wiki(tmpDir);
+    wiki.init();
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("writes a note to sources/user/notes/", () => {
+    expect(() => wiki.safeWriteNote("test-note", "hello world")).not.toThrow();
+    const notePath = path.join(tmpDir, "sources", "user", "notes", "test-note.md");
+    expect(fs.existsSync(notePath)).toBe(true);
+    expect(fs.readFileSync(notePath, "utf-8")).toBe("hello world");
+  });
+
+  it("rejects path traversal in slug", () => {
+    expect(() => wiki.safeWriteNote("../../etc/passwd", "hacked")).toThrow(
+      "outside sources/user/notes/"
+    );
+  });
+
+  it("rejects when target file is a symlink", () => {
+    const notesDir = path.join(tmpDir, "sources", "user", "notes");
+    fs.mkdirSync(notesDir, { recursive: true });
+
+    const outsideFile = path.join(tmpDir, "outside.md");
+    fs.writeFileSync(outsideFile, "original");
+    const symlinkPath = path.join(notesDir, "evil-note.md");
+
+    try {
+      fs.symlinkSync(outsideFile, symlinkPath, "file");
+    } catch {
+      return; // Symlinks not supported
+    }
+
+    expect(() => wiki.safeWriteNote("evil-note", "hacked")).toThrow("symlink");
+    expect(fs.readFileSync(outsideFile, "utf-8")).toBe("original");
+  });
+
+  it("rejects when notes/ directory is a symlink outside allowed path", () => {
+    const notesDir = path.join(tmpDir, "sources", "user", "notes");
+    const outsideDir = path.join(tmpDir, "outside-dir");
+    fs.mkdirSync(outsideDir, { recursive: true });
+
+    // Remove notes dir and replace with symlink to outside
+    fs.rmSync(notesDir, { recursive: true, force: true });
+    try {
+      fs.symlinkSync(outsideDir, notesDir, "dir");
+    } catch {
+      return; // Symlinks not supported
+    }
+
+    expect(() => wiki.safeWriteNote("test-note", "hacked")).toThrow(
+      "ancestor directory is a symlink"
+    );
+  });
+
+  it("rejects when sources/user is a symlink (ancestor bypass)", () => {
+    // This is the critical case: sources/user is a symlink, notes/ doesn't exist
+    // mkdirSync({recursive:true}) would follow the symlink without ancestor check
+    const userDir = path.join(tmpDir, "sources", "user");
+    const outsideDir = path.join(tmpDir, "outside-user");
+    fs.mkdirSync(outsideDir, { recursive: true });
+
+    // Remove entire sources/user and replace with symlink
+    fs.rmSync(userDir, { recursive: true, force: true });
+    try {
+      fs.symlinkSync(outsideDir, userDir, "dir");
+    } catch {
+      return; // Symlinks not supported
+    }
+
+    expect(() => wiki.safeWriteNote("test-note", "hacked")).toThrow(
+      "ancestor directory is a symlink"
+    );
+    // Verify nothing was written outside
+    expect(
+      fs.existsSync(path.join(outsideDir, "notes", "test-note.md"))
+    ).toBe(false);
+  });
+});

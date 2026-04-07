@@ -194,3 +194,72 @@ describe("CLI: autopedia init", () => {
   // on WSL2+NTFS due to JSDOM dependency tree. All CLI logic is covered by the
   // programmatic tests above.
 });
+
+// ── view command guard tests ─────────────────────────────────
+
+describe("CLI: autopedia view", () => {
+  let tmpDir: string;
+  let exitSpy: ReturnType<typeof import("vitest").vi.spyOn>;
+  let stderrSpy: ReturnType<typeof import("vitest").vi.spyOn>;
+
+  beforeEach(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "autopedia-view-"));
+    // Stub process.exit to prevent test runner from dying
+    exitSpy = (await import("vitest")).vi.spyOn(process, "exit").mockImplementation((() => {
+      throw new Error("process.exit called");
+    }) as never);
+    stderrSpy = (await import("vitest")).vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    exitSpy.mockRestore();
+    stderrSpy.mockRestore();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  async function runView(args: string[]) {
+    const { createCli } = await import("../src/cli.js");
+    const program = createCli();
+    program.exitOverride(); // Prevent commander from calling process.exit
+    await program.parseAsync(["node", "test", "view", ...args]);
+  }
+
+  it("rejects non-integer port", async () => {
+    await expect(runView(["--port", "abc", "--dir", tmpDir])).rejects.toThrow();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it("rejects port out of range (0)", async () => {
+    await expect(runView(["--port", "0", "--dir", tmpDir])).rejects.toThrow();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it("rejects port out of range (70000)", async () => {
+    await expect(runView(["--port", "70000", "--dir", tmpDir])).rejects.toThrow();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it("rejects port with trailing garbage (123abc)", async () => {
+    await expect(runView(["--port", "123abc", "--dir", tmpDir])).rejects.toThrow();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it("rejects when .autopedia/ doesn't exist", async () => {
+    const nonexistent = path.join(tmpDir, "nonexistent");
+    await expect(runView(["--dir", nonexistent])).rejects.toThrow();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(stderrSpy).toHaveBeenCalledWith(
+      expect.stringContaining(".autopedia/ not found")
+    );
+  });
+
+  it("rejects when wiki/ doesn't exist", async () => {
+    // Create .autopedia dir but NOT wiki/
+    fs.mkdirSync(tmpDir, { recursive: true });
+    await expect(runView(["--dir", tmpDir])).rejects.toThrow();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(stderrSpy).toHaveBeenCalledWith(
+      expect.stringContaining("No wiki/ directory")
+    );
+  });
+});

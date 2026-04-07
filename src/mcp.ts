@@ -583,9 +583,10 @@ export function createServer(kbRoot: string): McpServer {
     },
     async () => {
       const filePath = path.join(kbRoot, "schema", "identity.md");
-      const content = fs.existsSync(filePath)
-        ? fs.readFileSync(filePath, "utf-8")
-        : "# Identity\n\nNo identity configured. Run onboarding first.";
+      const content =
+        fs.existsSync(filePath) && !fs.lstatSync(filePath).isSymbolicLink()
+          ? fs.readFileSync(filePath, "utf-8")
+          : "# Identity\n\nNo identity configured. Run onboarding first.";
 
       return {
         contents: [
@@ -610,9 +611,10 @@ export function createServer(kbRoot: string): McpServer {
     },
     async () => {
       const filePath = path.join(kbRoot, "schema", "interests.md");
-      const content = fs.existsSync(filePath)
-        ? fs.readFileSync(filePath, "utf-8")
-        : "# Interests\n\nNo interests configured. Run onboarding first.";
+      const content =
+        fs.existsSync(filePath) && !fs.lstatSync(filePath).isSymbolicLink()
+          ? fs.readFileSync(filePath, "utf-8")
+          : "# Interests\n\nNo interests configured. Run onboarding first.";
 
       return {
         contents: [
