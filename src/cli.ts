@@ -53,6 +53,40 @@ function requireKbRoot(kbRoot: string): void {
   }
 }
 
+const TEXT_EXTENSIONS = new Set([".md", ".txt", ".text"]);
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+function addFileToWiki(wiki: Wiki, filePath: string, date: string, ts: string, index: number): void {
+  const stat = fs.statSync(filePath);
+  if (stat.size > MAX_FILE_SIZE) {
+    console.error(`  Skipped ${path.basename(filePath)}: too large (>${MAX_FILE_SIZE / 1024 / 1024}MB)`);
+    return;
+  }
+  if (fs.lstatSync(filePath).isSymbolicLink()) {
+    console.error(`  Skipped ${path.basename(filePath)}: symlink`);
+    return;
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  const basename = path.basename(filePath, ext);
+  const slug = `${date}-${ts}${index > 0 ? `-${index}` : ""}-${basename
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .slice(0, 40)
+    .replace(/-+$/, "")}`;
+
+  if (TEXT_EXTENSIONS.has(ext)) {
+    // Text file — read content, save as note
+    const content = fs.readFileSync(filePath, "utf-8");
+    wiki.safeWriteNote(slug, content);
+    wiki.addToQueue(`note:${slug}`);
+  } else {
+    // Binary file (PDF, docx, images, etc.) — copy as-is
+    wiki.saveUserFile(`${slug}${ext}`, filePath);
+    wiki.addToQueue(`file:${slug}${ext}`);
+  }
+}
+
 export function createCli(): Command {
   const program = new Command();
 
@@ -107,17 +141,19 @@ export function createCli(): Command {
 
   program
     .command("add <source>")
-    .description("Instantly queue a URL or text note (no fetch, no LLM call)")
+    .description("Queue a URL, text note, file, or folder for wiki processing")
     .option("-d, --dir <path>", "Path to .autopedia/ directory")
     .action(async (source: string, opts: { dir?: string }) => {
       const kbRoot = resolveKbRoot(opts.dir);
       requireKbRoot(kbRoot);
 
       const wiki = new Wiki(kbRoot);
+      const date = new Date().toISOString().split("T")[0];
+      const ts = Date.now().toString(36);
       const isUrl = source.startsWith("http://") || source.startsWith("https://");
 
       if (isUrl) {
-        // Validate URL (SSRF protection) — no fetch, just queue
+        // URL — validate + queue (no fetch)
         try {
           validateUrl(source);
         } catch (err) {
@@ -126,13 +162,31 @@ export function createCli(): Command {
           );
           process.exit(1);
         }
-
         wiki.addToQueue(source);
         console.log(`✓ Queued: ${source}`);
+      } else if (fs.existsSync(path.resolve(source)) && fs.statSync(path.resolve(source)).isDirectory()) {
+        // Directory — scan and add all files
+        const resolved = path.resolve(source);
+        const entries = fs.readdirSync(resolved).filter((f) => {
+          const full = path.join(resolved, f);
+          return fs.statSync(full).isFile() && !fs.lstatSync(full).isSymbolicLink();
+        });
+        if (entries.length === 0) {
+          console.error("Error: no files found in directory.");
+          process.exit(1);
+        }
+        let count = 0;
+        for (const entry of entries) {
+          addFileToWiki(wiki, path.join(resolved, entry), date, ts, count);
+          count++;
+        }
+        console.log(`✓ Added ${count} file(s) from ${path.basename(resolved)}/`);
+      } else if (fs.existsSync(path.resolve(source)) && fs.statSync(path.resolve(source)).isFile()) {
+        // Single file
+        addFileToWiki(wiki, path.resolve(source), date, ts, 0);
+        console.log(`✓ Added: ${path.basename(source)}`);
       } else {
-        // Save as text note (via safe write with symlink validation)
-        const date = new Date().toISOString().split("T")[0];
-        const ts = Date.now().toString(36);
+        // Text note (fallback — backward compatible)
         const slug = `${date}-${ts}-${source
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, "-")
@@ -140,7 +194,6 @@ export function createCli(): Command {
           .replace(/-+$/, "")}`;
         wiki.safeWriteNote(slug, source);
         wiki.addToQueue(`note:${slug}`);
-
         console.log(`✓ Saved note: "${source.slice(0, 50)}${source.length > 50 ? "..." : ""}"`);
       }
 

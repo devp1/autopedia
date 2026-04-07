@@ -206,6 +206,43 @@ export class Wiki {
     this.safeWrite(path.join("sources", "agent", `${slug}.md`), content);
   }
 
+  saveUserFile(filename: string, sourcePath: string): void {
+    // Reject path traversal
+    if (filename.includes("..") || filename.includes("/") || filename.includes("\\") || filename.includes("\0")) {
+      throw new Error("Write rejected: invalid filename");
+    }
+
+    const destPath = path.join("sources", "user", filename);
+    const resolved = path.resolve(this.root, destPath);
+    const allowedDir = path.join(this.root, "sources", "user") + path.sep;
+
+    if (!resolved.startsWith(allowedDir)) {
+      throw new Error("Write rejected: file path resolves outside sources/user/");
+    }
+    if (fs.existsSync(resolved) && fs.lstatSync(resolved).isSymbolicLink()) {
+      throw new Error("Write rejected: target is a symlink");
+    }
+
+    // Ancestor symlink check (mirrors safeWriteNote hardening)
+    let ancestor = path.dirname(resolved);
+    while (ancestor.length >= this.root.length) {
+      if (fs.existsSync(ancestor)) {
+        if (fs.lstatSync(ancestor).isSymbolicLink()) {
+          throw new Error("Write rejected: ancestor directory is a symlink");
+        }
+        const realAncestor = fs.realpathSync(ancestor);
+        if (realAncestor !== this.root && !realAncestor.startsWith(this.root + path.sep)) {
+          throw new Error("Write rejected: ancestor directory resolves outside KB root");
+        }
+        break;
+      }
+      ancestor = path.dirname(ancestor);
+    }
+
+    fs.mkdirSync(path.dirname(resolved), { recursive: true });
+    fs.copyFileSync(sourcePath, resolved);
+  }
+
   listUnprocessedSources(): string[] {
     const queuePath = path.join(this.root, "ops", "queue.md");
     if (!fs.existsSync(queuePath)) return [];

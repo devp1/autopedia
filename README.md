@@ -91,21 +91,23 @@ AI:  → finds orphan pages, stale content, contradictions
      → fixes them automatically
 ```
 
-**Between sessions**, you can queue things from any terminal:
+**Between sessions**, you can braindump from any terminal:
 
 ```bash
-autopedia add "https://example.com/interesting-article"
-autopedia add "Note: GPU prices dropped 20% this quarter"
+autopedia add "https://example.com/interesting-article"    # URL
+autopedia add "GPU prices dropped 20% this quarter"        # text note
+autopedia add ~/research/gpu-report.pdf                    # file
+autopedia add ~/research/                                  # whole folder
 ```
 
-These are saved immediately and processed the next time your AI tool connects.
+Everything is saved instantly and processed the next time your AI tool connects.
 
 ## CLI Commands
 
 | Command | What it does |
 |---------|-------------|
 | `autopedia init` | Create `~/.autopedia/` directory structure |
-| `autopedia add <url-or-text>` | Instantly queue a URL or text note (no fetch, no delay) |
+| `autopedia add <source>` | Queue a URL, text note, file, or folder for processing |
 | `autopedia serve` | Start MCP server (used by your AI tool, not run manually) |
 | `autopedia status` | Show wiki page count and unprocessed sources |
 | `autopedia search <query>` | Search wiki pages from the terminal |
@@ -179,7 +181,7 @@ git clone https://github.com/devp1/autopedia
 cd autopedia
 npm install
 npm run build
-npm test          # 183 tests
+npm test          # 186 tests
 npm run typecheck # TypeScript strict mode
 npm run lint      # ESLint
 ```

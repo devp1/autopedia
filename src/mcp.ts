@@ -298,24 +298,54 @@ export function createServer(kbRoot: string): McpServer {
         throw new Error("Invalid slug: path traversal not allowed");
       }
 
-      const filename = args.slug.endsWith(".md") ? args.slug : `${args.slug}.md`;
+      // If slug has an extension, use as-is; otherwise append .md
+      const hasExtension = /\.[a-z0-9]+$/i.test(args.slug);
+      const filename = hasExtension ? args.slug : `${args.slug}.md`;
 
-      // Try sources/agent/ first, then sources/user/notes/
+      // Try sources/agent/ first, then sources/user/notes/, then sources/user/
       const candidates = [
         path.join(kbRoot, "sources", "agent", filename),
         path.join(kbRoot, "sources", "user", "notes", filename),
+        path.join(kbRoot, "sources", "user", filename),
       ];
 
       for (const filePath of candidates) {
         if (fs.existsSync(filePath)) {
-          // Symlink protection
+          // Symlink protection: leaf file
           if (fs.lstatSync(filePath).isSymbolicLink()) {
             throw new Error(`Read rejected: ${filename} is a symlink`);
           }
-          const content = fs.readFileSync(filePath, "utf-8");
-          return {
-            content: [{ type: "text" as const, text: content }],
-          };
+          // Symlink protection: ancestor directories
+          const realPath = fs.realpathSync(filePath);
+          if (!realPath.startsWith(kbRoot + path.sep) && realPath !== kbRoot) {
+            throw new Error(`Read rejected: ${filename} resolves outside KB root`);
+          }
+
+          // For non-text files, return the file path so the AI can read it natively
+          const isText = /\.(md|txt|text)$/i.test(filePath);
+          if (isText) {
+            const content = fs.readFileSync(filePath, "utf-8");
+            return {
+              content: [{ type: "text" as const, text: content }],
+            };
+          } else {
+            // Return metadata + path — the AI reads the file itself (PDFs, images, etc.)
+            const stat = fs.statSync(filePath);
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify({
+                    type: "file",
+                    path: filePath,
+                    filename,
+                    size: stat.size,
+                    message: `Non-text file (${path.extname(filePath)}). Use your native file reading capabilities to process this file at the path above.`,
+                  }),
+                },
+              ],
+            };
+          }
         }
       }
 

@@ -160,7 +160,6 @@ describe("CLI: autopedia init", () => {
       doInit();
 
       const wiki = new Wiki(kbRoot);
-      // Simulate what CLI add now does: just validate + queue
       wiki.addToQueue("https://example.com/some-article");
 
       const queue = fs.readFileSync(
@@ -169,10 +168,85 @@ describe("CLI: autopedia init", () => {
       );
       expect(queue).toContain("- [ ] https://example.com/some-article");
 
-      // No source file should be saved (no fetch happened)
       const agentDir = path.join(kbRoot, "sources", "agent");
       const agentFiles = fs.readdirSync(agentDir);
       expect(agentFiles).toHaveLength(0);
+    });
+  });
+
+  // ── add (file) ────────────────────────────────────────────
+
+  describe("add operation (file)", () => {
+    it("adds a .md file as a note in sources/user/notes/", () => {
+      doInit();
+
+      // Create a test .md file
+      const testFile = path.join(tmpDir, "article.md");
+      fs.writeFileSync(testFile, "# GPU Pricing\n\nPrices are dropping fast.");
+
+      const wiki = new Wiki(kbRoot);
+      const content = fs.readFileSync(testFile, "utf-8");
+      const slug = "2026-01-01-test-article";
+      wiki.safeWriteNote(slug, content);
+      wiki.addToQueue(`note:${slug}`);
+
+      const notesDir = path.join(kbRoot, "sources", "user", "notes");
+      const files = fs.readdirSync(notesDir);
+      expect(files.some((f) => f.includes(slug))).toBe(true);
+
+      const queue = fs.readFileSync(path.join(kbRoot, "ops", "queue.md"), "utf-8");
+      expect(queue).toContain(`note:${slug}`);
+    });
+
+    it("adds a non-text file to sources/user/ with file: prefix", () => {
+      doInit();
+
+      // Create a test PDF-like file
+      const testFile = path.join(tmpDir, "report.pdf");
+      fs.writeFileSync(testFile, "fake PDF content");
+
+      const wiki = new Wiki(kbRoot);
+      const slug = "2026-01-01-test-report.pdf";
+      wiki.saveUserFile(slug, testFile);
+      wiki.addToQueue(`file:${slug}`);
+
+      const userDir = path.join(kbRoot, "sources", "user");
+      expect(fs.existsSync(path.join(userDir, slug))).toBe(true);
+
+      const queue = fs.readFileSync(path.join(kbRoot, "ops", "queue.md"), "utf-8");
+      expect(queue).toContain(`file:${slug}`);
+    });
+  });
+
+  // ── add (folder) ──────────────────────────────────────────
+
+  describe("add operation (folder)", () => {
+    it("queues multiple files from a directory", () => {
+      doInit();
+
+      // Create test folder with files
+      const testDir = path.join(tmpDir, "research");
+      fs.mkdirSync(testDir);
+      fs.writeFileSync(path.join(testDir, "notes.md"), "# Notes\n\nSome research.");
+      fs.writeFileSync(path.join(testDir, "data.txt"), "Raw data here.");
+
+      const wiki = new Wiki(kbRoot);
+      const entries = fs.readdirSync(testDir).filter((f) =>
+        fs.statSync(path.join(testDir, f)).isFile()
+      );
+      expect(entries).toHaveLength(2);
+
+      // Simulate adding each file
+      for (const entry of entries) {
+        const content = fs.readFileSync(path.join(testDir, entry), "utf-8");
+        const slug = `2026-01-01-test-${entry.replace(/\.[^.]+$/, "").toLowerCase()}`;
+        wiki.safeWriteNote(slug, content);
+        wiki.addToQueue(`note:${slug}`);
+      }
+
+      const queue = fs.readFileSync(path.join(kbRoot, "ops", "queue.md"), "utf-8");
+      expect(queue).toContain("note:2026-01-01-test-notes");
+      expect(queue).toContain("note:2026-01-01-test-data");
     });
   });
 
