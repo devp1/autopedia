@@ -31,20 +31,42 @@ function findKbRoot(): string {
   return globalRoot;
 }
 
+function resolveKbRoot(dir?: string): string {
+  if (!dir) return findKbRoot();
+  const resolved = path.resolve(dir);
+  // Accept both the .autopedia dir itself and its parent
+  if (resolved.endsWith(".autopedia")) return resolved;
+  return path.join(resolved, ".autopedia");
+}
+
+function requireKbRoot(kbRoot: string): void {
+  if (!fs.existsSync(kbRoot)) {
+    console.error("Error: .autopedia/ not found. Run `autopedia init` first.");
+    process.exit(1);
+  }
+  // Validate this is actually an autopedia root, not an arbitrary directory
+  const wikiDir = path.join(kbRoot, "wiki");
+  const opsDir = path.join(kbRoot, "ops");
+  if (!fs.existsSync(wikiDir) || !fs.existsSync(opsDir)) {
+    console.error("Error: directory exists but is not an autopedia knowledge base (missing wiki/ or ops/).");
+    process.exit(1);
+  }
+}
+
 export function createCli(): Command {
   const program = new Command();
 
   program
     .name("autopedia")
     .description("Personal knowledge wiki maintained by your AI tool via MCP")
-    .version("0.1.0");
+    .version("0.2.0");
 
   // ── init ────────────────────────────────────────────────────
 
   program
     .command("init")
     .description("Initialize a new autopedia knowledge base")
-    .option("-d, --dir <path>", "Directory for .autopedia/ (default: ~/)")
+    .option("-d, --dir <path>", "Parent directory for .autopedia/ (default: ~/)")
     .action(async (opts: { dir?: string }) => {
       const kbRoot = opts.dir
         ? path.resolve(opts.dir, ".autopedia")
@@ -86,15 +108,10 @@ export function createCli(): Command {
   program
     .command("add <source>")
     .description("Add a URL or text to the source queue (no LLM call)")
-    .option("-d, --dir <path>", "Path to .autopedia/")
+    .option("-d, --dir <path>", "Path to .autopedia/ directory")
     .action(async (source: string, opts: { dir?: string }) => {
-      const kbRoot = opts.dir ? path.resolve(opts.dir) : findKbRoot();
-      if (!fs.existsSync(kbRoot)) {
-        console.error(
-          "Error: .autopedia/ not found. Run `autopedia init` first."
-        );
-        process.exit(1);
-      }
+      const kbRoot = resolveKbRoot(opts.dir);
+      requireKbRoot(kbRoot);
 
       const wiki = new Wiki(kbRoot);
       const date = new Date().toISOString().split("T")[0];
@@ -177,15 +194,10 @@ export function createCli(): Command {
   program
     .command("serve")
     .description("Start the autopedia MCP server (stdio transport)")
-    .option("-d, --dir <path>", "Path to .autopedia/")
+    .option("-d, --dir <path>", "Path to .autopedia/ directory")
     .action(async (opts: { dir?: string }) => {
-      const kbRoot = opts.dir ? path.resolve(opts.dir) : findKbRoot();
-      if (!fs.existsSync(kbRoot)) {
-        console.error(
-          "Error: .autopedia/ not found. Run `autopedia init` first."
-        );
-        process.exit(1);
-      }
+      const kbRoot = resolveKbRoot(opts.dir);
+      requireKbRoot(kbRoot);
 
       await startServer(kbRoot);
     });
@@ -196,7 +208,7 @@ export function createCli(): Command {
     .command("view")
     .description("Browse your wiki locally with Quartz")
     .option("-p, --port <port>", "Port to serve on", "8080")
-    .option("-d, --dir <path>", "Path to .autopedia/")
+    .option("-d, --dir <path>", "Path to .autopedia/ directory")
     .action(async (opts: { port: string; dir?: string }) => {
       // Validate port is a safe integer (strict: reject "123abc", "1.5", etc.)
       const port = /^\d+$/.test(opts.port) ? Number(opts.port) : NaN;
@@ -206,13 +218,8 @@ export function createCli(): Command {
       }
       const portStr = String(port);
 
-      const kbRoot = opts.dir ? path.resolve(opts.dir) : findKbRoot();
-      if (!fs.existsSync(kbRoot)) {
-        console.error(
-          "Error: .autopedia/ not found. Run `autopedia init` first."
-        );
-        process.exit(1);
-      }
+      const kbRoot = resolveKbRoot(opts.dir);
+      requireKbRoot(kbRoot);
 
       const wikiDir = path.join(kbRoot, "wiki");
       if (!fs.existsSync(wikiDir)) {
@@ -234,10 +241,11 @@ export function createCli(): Command {
           process.exit(1);
         }
 
-        console.log("Cloning Quartz v4...");
+        const QUARTZ_VERSION = "v4.5.2";
+        console.log(`Cloning Quartz ${QUARTZ_VERSION}...`);
         execFileSync(
           "git",
-          ["clone", "--depth", "1", "https://github.com/jackyzha0/quartz.git", quartzDir],
+          ["clone", "--depth", "1", "--branch", QUARTZ_VERSION, "https://github.com/jackyzha0/quartz.git", quartzDir],
           { stdio: "inherit" }
         );
 
@@ -366,15 +374,10 @@ export default config
   program
     .command("status")
     .description("Show wiki status and stats")
-    .option("-d, --dir <path>", "Path to .autopedia/")
+    .option("-d, --dir <path>", "Path to .autopedia/ directory")
     .action(async (opts: { dir?: string }) => {
-      const kbRoot = opts.dir ? path.resolve(opts.dir) : findKbRoot();
-      if (!fs.existsSync(kbRoot)) {
-        console.error(
-          "Error: .autopedia/ not found. Run `autopedia init` first."
-        );
-        process.exit(1);
-      }
+      const kbRoot = resolveKbRoot(opts.dir);
+      requireKbRoot(kbRoot);
 
       const wiki = new Wiki(kbRoot);
       const pages = wiki.listPages();
@@ -399,6 +402,90 @@ export default config
         for (const item of unprocessed) {
           console.log(`  - ${item}`);
         }
+      }
+    });
+
+  // ── search ─────────────────────────────────────────────────
+
+  program
+    .command("search <query...>")
+    .description("Search wiki pages (no MCP session needed)")
+    .option("-d, --dir <path>", "Path to .autopedia/ directory")
+    .action(async (queryParts: string[], opts: { dir?: string }) => {
+      const trimmed = queryParts.join(" ").trim();
+      if (!trimmed) {
+        console.error("Error: query cannot be empty.");
+        process.exit(1);
+      }
+
+      const kbRoot = resolveKbRoot(opts.dir);
+      requireKbRoot(kbRoot);
+
+      const wiki = new Wiki(kbRoot);
+      const results = wiki.searchPages(trimmed);
+
+      if (results.length === 0) {
+        console.log(`No results for "${trimmed}"`);
+      } else {
+        for (const r of results) {
+          console.log(`${r.path}:`);
+          for (const line of r.matches) {
+            console.log(`  ${line}`);
+          }
+          console.log();
+        }
+      }
+    });
+
+  // ── export ─────────────────────────────────────────────────
+
+  program
+    .command("export")
+    .description("Export wiki as a single markdown file")
+    .option("-d, --dir <path>", "Path to .autopedia/ directory")
+    .option("-o, --output <path>", "Output file (default: stdout)")
+    .action(async (opts: { dir?: string; output?: string }) => {
+      const kbRoot = resolveKbRoot(opts.dir);
+      requireKbRoot(kbRoot);
+
+      const wiki = new Wiki(kbRoot);
+      const pages = wiki.listPages();
+
+      if (pages.length === 0) {
+        console.error("No wiki pages to export.");
+        process.exit(1);
+      }
+
+      // Index first, then alphabetical
+      const sorted = pages.sort((a, b) => {
+        if (a === "index.md") return -1;
+        if (b === "index.md") return 1;
+        return a.localeCompare(b);
+      });
+
+      let output = "";
+      for (const page of sorted) {
+        const content = wiki.readPage(page);
+        if (content) {
+          output += `<!-- ${page} -->\n\n${content}\n\n`;
+        }
+      }
+
+      if (opts.output) {
+        const resolved = path.resolve(opts.output);
+        const wikiDir = path.join(kbRoot, "wiki");
+        // Use realpath for symlink-safe comparison
+        const realWikiDir = fs.existsSync(wikiDir) ? fs.realpathSync(wikiDir) : wikiDir;
+        const outputParent = path.dirname(resolved);
+        const realOutputParent = fs.existsSync(outputParent) ? fs.realpathSync(outputParent) : outputParent;
+        if (realOutputParent.startsWith(realWikiDir + path.sep) || realOutputParent === realWikiDir) {
+          console.error("Error: cannot export into wiki/ directory.");
+          process.exit(1);
+        }
+        fs.writeFileSync(resolved, output.trimStart(), "utf-8");
+        console.log(`Exported ${sorted.length} pages to ${opts.output}`);
+      } else {
+        process.stdout.write(output.trimStart());
       }
     });
 

@@ -1,6 +1,6 @@
 {
   "name": "autopedia",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Personal knowledge wiki maintained by your AI tool via MCP",
   "type": "module",
   "main": "dist/mcp.js",

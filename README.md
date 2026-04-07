@@ -114,7 +114,9 @@ autopedia implements [Karpathy's three wiki operations](https://x.com/karpathy/s
 | `autopedia add <url-or-text>` | Save a source to the queue (no LLM call, processed later) |
 | `autopedia serve` | Start MCP server (stdio transport) |
 | `autopedia status` | Show wiki stats and unprocessed sources |
-| `autopedia view` | Browse your wiki locally with [Quartz](https://quartz.jzhao.xyz/) |
+| `autopedia view` | Browse your wiki locally with [Quartz](https://quartz.jzhao.xyz/) (pinned to v4.5.2) |
+| `autopedia search <query>` | Search wiki pages from the terminal (no MCP session needed) |
+| `autopedia export` | Export wiki as a single markdown file (`--output file.md` or stdout) |
 
 ## Browsing your wiki
 
@@ -177,9 +179,9 @@ npm run lint      # ESLint
 ## Roadmap
 
 ### v0.3 (next)
-- `autopedia search <query>` — search wiki from CLI without MCP session
-- `autopedia export` — export wiki as single markdown or HTML
-- View improvements: custom Quartz layout, pinned version, watch mode
+- Sources visibility via curated wiki summary pages
+- View improvements: custom Quartz layout, watch mode
+- Better symlink test coverage on non-Linux platforms
 
 ### v0.4 (future)
 - Claude Code skill alongside MCP (zero-friction entry point)

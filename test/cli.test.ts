@@ -253,13 +253,98 @@ describe("CLI: autopedia view", () => {
     );
   });
 
-  it("rejects when wiki/ doesn't exist", async () => {
-    // Create .autopedia dir but NOT wiki/
-    fs.mkdirSync(tmpDir, { recursive: true });
+  it("rejects when directory is not an autopedia root", async () => {
+    // Create .autopedia dir but NOT wiki/ or ops/ subdirectories
+    const fakeRoot = path.join(tmpDir, ".autopedia");
+    fs.mkdirSync(fakeRoot, { recursive: true });
     await expect(runView(["--dir", tmpDir])).rejects.toThrow();
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(stderrSpy).toHaveBeenCalledWith(
-      expect.stringContaining("No wiki/ directory")
+      expect.stringContaining("not an autopedia knowledge base")
     );
+  });
+});
+
+// ── search command tests ─────────────────────────────────────
+
+describe("CLI: autopedia search", () => {
+  let tmpDir: string;
+  let kbRoot: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "autopedia-search-"));
+    kbRoot = path.join(tmpDir, ".autopedia");
+    const wiki = new Wiki(kbRoot);
+    wiki.init();
+    // Add a page with searchable content
+    wiki.writePage("test-topic.md", "# Test Topic\n\nThis page is about inference costs and GPU pricing.");
+    wiki.writePage("other.md", "# Other\n\nUnrelated content here.");
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("finds matching pages", () => {
+    const wiki = new Wiki(kbRoot);
+    const results = wiki.searchPages("inference");
+    expect(results.length).toBeGreaterThanOrEqual(1);
+    expect(results[0].path).toBe("test-topic.md");
+    expect(results[0].matches.length).toBeGreaterThan(0);
+  });
+
+  it("returns empty for no match", () => {
+    const wiki = new Wiki(kbRoot);
+    const results = wiki.searchPages("xyznonexistent");
+    expect(results).toHaveLength(0);
+  });
+});
+
+// ── export command tests ─────────────────────────────────────
+
+describe("CLI: autopedia export", () => {
+  let tmpDir: string;
+  let kbRoot: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "autopedia-export-"));
+    kbRoot = path.join(tmpDir, ".autopedia");
+    const wiki = new Wiki(kbRoot);
+    wiki.init();
+    wiki.writePage("alpha.md", "# Alpha\n\nFirst page.");
+    wiki.writePage("beta.md", "# Beta\n\nSecond page.");
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("exports all pages with markers", () => {
+    const wiki = new Wiki(kbRoot);
+    const pages = wiki.listPages();
+    let output = "";
+    const sorted = pages.sort((a, b) => {
+      if (a === "index.md") return -1;
+      if (b === "index.md") return 1;
+      return a.localeCompare(b);
+    });
+    for (const page of sorted) {
+      const content = wiki.readPage(page);
+      if (content) output += `<!-- ${page} -->\n\n${content}\n\n`;
+    }
+    expect(output).toContain("<!-- index.md -->");
+    expect(output).toContain("<!-- alpha.md -->");
+    expect(output).toContain("<!-- beta.md -->");
+    // Index should come first
+    const indexPos = output.indexOf("<!-- index.md -->");
+    const alphaPos = output.indexOf("<!-- alpha.md -->");
+    expect(indexPos).toBeLessThan(alphaPos);
+  });
+
+  it("rejects output inside wiki/ directory", () => {
+    const wikiDir = path.join(kbRoot, "wiki");
+    const outputPath = path.join(wikiDir, "export.md");
+    const resolved = path.resolve(outputPath);
+    expect(resolved.startsWith(wikiDir + path.sep)).toBe(true);
   });
 });
