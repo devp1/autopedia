@@ -56,182 +56,269 @@ function renderMarkdown(content: string): string {
 // ── Design tokens ───────────────────────────────────────────────
 
 const CSS = `
+/* ── Fonts: Newsreader (display) + DM Sans (body) ── */
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,500;0,6..72,700;1,6..72,400&family=DM+Sans:wght@400;500;700&family=JetBrains+Mono:wght@400&display=swap');
+
 :root {
-  --bg: #ffffff;
-  --surface: #f6f5f4;
-  --text: rgba(0,0,0,0.95);
-  --text-secondary: #615d59;
-  --accent: #0075de;
-  --border: rgba(0,0,0,0.1);
-  --sidebar-bg: #f6f5f4;
-  --sidebar-active: #0075de;
-  --code-bg: #f6f5f4;
+  --bg: #fafaf9;
+  --surface: #ffffff;
+  --text: #1a1a19;
+  --text-secondary: #78756f;
+  --accent: #c45d3e;
+  --accent-hover: #a84a2f;
+  --accent-subtle: rgba(196,93,62,0.08);
+  --border: #e8e6e1;
+  --sidebar-bg: #f3f2ee;
+  --sidebar-hover: rgba(0,0,0,0.04);
+  --code-bg: #f3f2ee;
+  --code-border: #e0ddd7;
+  --shadow: 0 1px 3px rgba(0,0,0,0.04);
+  --font-display: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #08090a;
-    --surface: #0f1011;
-    --text: #f7f8f8;
-    --text-secondary: #8b8b8b;
-    --accent: #5e6ad2;
-    --border: rgba(255,255,255,0.08);
-    --sidebar-bg: #0f1011;
-    --sidebar-active: #5e6ad2;
-    --code-bg: #161618;
+    --bg: #0c0c0b;
+    --surface: #141413;
+    --text: #e8e6e1;
+    --text-secondary: #7a7872;
+    --accent: #e07a5f;
+    --accent-hover: #eb9178;
+    --accent-subtle: rgba(224,122,95,0.1);
+    --border: #252420;
+    --sidebar-bg: #111110;
+    --sidebar-hover: rgba(255,255,255,0.04);
+    --code-bg: #1a1918;
+    --code-border: #2a2825;
+    --shadow: 0 1px 3px rgba(0,0,0,0.3);
   }
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+html { scroll-behavior: smooth; }
+
 body {
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 16px;
-  line-height: 1.6;
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.7;
   color: var(--text);
   background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .layout {
   display: grid;
-  grid-template-columns: 240px 1fr;
-  grid-template-rows: 56px 1fr;
+  grid-template-columns: 260px 1fr;
+  grid-template-rows: 1fr;
   min-height: 100vh;
-}
-
-/* ── Header ─────────────────────────────── */
-
-.header {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-}
-
-.header h1 {
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-.header h1 a {
-  color: var(--text);
-  text-decoration: none;
-}
-
-.theme-toggle {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 10px;
-  cursor: pointer;
-  font-size: 16px;
-  color: var(--text);
 }
 
 /* ── Sidebar ────────────────────────────── */
 
 .sidebar {
-  padding: 16px 0;
-  border-right: 1px solid var(--border);
+  padding: 32px 0 24px;
   background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
   overflow-y: auto;
+  position: sticky;
+  top: 0;
+  height: 100vh;
 }
+
+.sidebar-brand {
+  padding: 0 24px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-brand a {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  text-decoration: none;
+  letter-spacing: -0.03em;
+}
+
+.theme-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  color: var(--text-secondary);
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+
+.theme-toggle:hover { color: var(--text); }
+
+.sidebar-section { margin-bottom: 8px; }
 
 .sidebar h2 {
-  font-size: 11px;
-  font-weight: 600;
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   color: var(--text-secondary);
-  padding: 8px 16px 4px;
+  padding: 12px 24px 6px;
 }
 
-.sidebar ul {
-  list-style: none;
-  padding: 0;
-}
+.sidebar ul { list-style: none; }
 
 .sidebar li a {
   display: block;
-  padding: 4px 16px 4px 20px;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--text);
+  padding: 5px 24px 5px 28px;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-secondary);
   text-decoration: none;
-  border-left: 3px solid transparent;
-  transition: background 0.1s;
+  border-left: 2px solid transparent;
+  transition: all 0.12s ease;
 }
 
 .sidebar li a:hover {
-  background: var(--border);
+  color: var(--text);
+  background: var(--sidebar-hover);
 }
 
 .sidebar li a.active {
-  border-left-color: var(--sidebar-active);
-  font-weight: 700;
-  color: var(--sidebar-active);
+  color: var(--accent);
+  border-left-color: var(--accent);
+  font-weight: 500;
+  background: var(--accent-subtle);
 }
 
-.sidebar .queue-badge {
-  font-size: 12px;
+.queue-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
   background: var(--accent);
   color: #fff;
-  border-radius: 10px;
-  padding: 1px 7px;
+  border-radius: 8px;
+  padding: 1px 6px;
   margin-left: 6px;
-  font-weight: 600;
+  vertical-align: middle;
+  line-height: 1.4;
 }
+
+.sidebar-nav-link {
+  display: block;
+  padding: 5px 24px 5px 28px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 0.12s;
+}
+
+.sidebar-nav-link:hover { color: var(--text); }
+.sidebar-nav-link.active { color: var(--accent); font-weight: 500; }
 
 /* ── Content ────────────────────────────── */
 
 .content {
-  padding: 32px 48px;
-  max-width: 800px;
+  padding: 48px 56px 80px;
+  max-width: 720px;
   overflow-y: auto;
 }
 
-.content h1 { font-size: 24px; font-weight: 700; margin-bottom: 16px; }
-.content h2 { font-size: 20px; font-weight: 600; margin: 24px 0 12px; }
-.content h3 { font-size: 17px; font-weight: 600; margin: 20px 0 8px; }
-.content p { margin-bottom: 12px; }
-.content ul, .content ol { margin-bottom: 12px; padding-left: 24px; }
-.content li { margin-bottom: 4px; }
-.content a { color: var(--accent); text-decoration: none; }
-.content a:hover { text-decoration: underline; }
+.content h1 {
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.content h2 {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  margin: 40px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+
+.content h3 {
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 700;
+  margin: 28px 0 8px;
+  color: var(--text);
+}
+
+.content p { margin-bottom: 16px; }
+
+.content ul, .content ol {
+  margin-bottom: 16px;
+  padding-left: 20px;
+}
+
+.content li {
+  margin-bottom: 6px;
+  line-height: 1.6;
+}
+
+.content a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.content a:hover { border-bottom-color: var(--accent); }
 
 .content pre {
+  font-family: var(--font-mono);
   background: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 12px 16px;
+  border: 1px solid var(--code-border);
+  border-radius: 8px;
+  padding: 16px 20px;
   overflow-x: auto;
-  margin-bottom: 12px;
-  font-size: 14px;
+  margin-bottom: 20px;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .content code {
+  font-family: var(--font-mono);
   background: var(--code-bg);
-  border-radius: 3px;
-  padding: 1px 5px;
-  font-size: 14px;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 13px;
 }
 
-.content pre code { background: none; padding: 0; }
+.content pre code { background: none; padding: 0; border-radius: 0; }
 
 .content blockquote {
-  border-left: 3px solid var(--accent);
-  padding-left: 16px;
+  border-left: 2px solid var(--accent);
+  padding: 2px 0 2px 20px;
+  margin: 0 0 20px;
   color: var(--text-secondary);
-  margin-bottom: 12px;
+  font-style: italic;
+}
+
+.content hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 32px 0;
 }
 
 .wikilink {
   color: var(--accent);
+  text-decoration: none;
   border-bottom: 1px dashed var(--accent);
+  transition: border-color 0.15s;
 }
 
 .wikilink:hover { border-bottom-style: solid; }
@@ -240,8 +327,9 @@ body {
 
 .empty {
   color: var(--text-secondary);
-  font-style: italic;
-  padding: 24px 0;
+  padding: 32px 0;
+  font-size: 15px;
+  line-height: 1.7;
 }
 
 /* ── Source list ─────────────────────────── */
@@ -252,40 +340,57 @@ body {
 }
 
 .source-list li {
-  padding: 8px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--border);
 }
 
-.source-list li a { color: var(--accent); text-decoration: none; }
-.source-list li a:hover { text-decoration: underline; }
+.source-list li:last-child { border-bottom: none; }
+
+.source-list li a {
+  font-weight: 500;
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: all 0.15s;
+}
+
+.source-list li a:hover {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
 
 /* ── Status cards ────────────────────────── */
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 16px;
-  margin-bottom: 24px;
+  margin-bottom: 32px;
 }
 
 .stat-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 16px;
+  border-radius: 10px;
+  padding: 20px 24px;
+  box-shadow: var(--shadow);
 }
 
 .stat-card .label {
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   color: var(--text-secondary);
 }
 
 .stat-card .value {
-  font-size: 28px;
+  font-family: var(--font-display);
+  font-size: 36px;
   font-weight: 700;
   margin-top: 4px;
+  letter-spacing: -0.02em;
+  color: var(--text);
 }
 
 /* ── Responsive ─────────────────────────── */
@@ -293,26 +398,45 @@ body {
 @media (max-width: 768px) {
   .layout {
     grid-template-columns: 1fr;
-    grid-template-rows: 56px auto 1fr;
+    grid-template-rows: auto 1fr;
   }
 
   .sidebar {
+    position: static;
+    height: auto;
     border-right: none;
     border-bottom: 1px solid var(--border);
+    padding: 16px 0 8px;
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: 4px;
-    padding: 8px 16px;
-    overflow-x: auto;
   }
 
+  .sidebar-brand { padding: 0 16px 12px; }
   .sidebar h2 { display: none; }
-  .sidebar ul { display: flex; gap: 4px; flex-wrap: wrap; }
-  .sidebar li a { padding: 4px 10px; border-left: none; border-radius: 6px; font-size: 14px; }
+  .sidebar-section { display: flex; flex-wrap: wrap; gap: 2px; padding: 0 12px; }
+  .sidebar ul { display: flex; flex-wrap: wrap; gap: 2px; }
+  .sidebar li a {
+    padding: 4px 12px;
+    border-left: none;
+    border-radius: 6px;
+    font-size: 13px;
+  }
   .sidebar li a.active { background: var(--accent); color: #fff; border-left: none; }
 
-  .content { padding: 16px; }
+  .content { padding: 24px 16px 48px; }
+  .content h1 { font-size: 26px; }
+  .content h2 { font-size: 19px; }
 }
+
+/* ── Page load animation ─────────────────── */
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.content { animation: fadeIn 0.25s ease-out; }
 `;
 
 // ── Theme toggle script (minimal inline JS) ─────────────────────
@@ -324,18 +448,25 @@ const THEME_SCRIPT = `
   var html = document.documentElement;
   var stored = localStorage.getItem('autopedia-theme');
   if (stored) html.setAttribute('data-theme', stored);
+  function updateIcon() {
+    var theme = html.getAttribute('data-theme') ||
+      (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    if (btn) btn.textContent = theme === 'dark' ? '\\u2600' : '\\u263E';
+  }
+  updateIcon();
   if (btn) btn.addEventListener('click', function() {
     var current = html.getAttribute('data-theme');
     var next = current === 'dark' ? 'light' : (current === 'light' ? 'dark' :
       (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'light' : 'dark'));
     html.setAttribute('data-theme', next);
     localStorage.setItem('autopedia-theme', next);
+    updateIcon();
   });
 })();
 </script>
 <style>
-[data-theme="dark"] { --bg:#08090a; --surface:#0f1011; --text:#f7f8f8; --text-secondary:#8b8b8b; --accent:#5e6ad2; --border:rgba(255,255,255,0.08); --sidebar-bg:#0f1011; --sidebar-active:#5e6ad2; --code-bg:#161618; }
-[data-theme="light"] { --bg:#ffffff; --surface:#f6f5f4; --text:rgba(0,0,0,0.95); --text-secondary:#615d59; --accent:#0075de; --border:rgba(0,0,0,0.1); --sidebar-bg:#f6f5f4; --sidebar-active:#0075de; --code-bg:#f6f5f4; }
+[data-theme="dark"] { --bg:#0c0c0b; --surface:#141413; --text:#e8e6e1; --text-secondary:#7a7872; --accent:#e07a5f; --accent-hover:#eb9178; --accent-subtle:rgba(224,122,95,0.1); --border:#252420; --sidebar-bg:#111110; --sidebar-hover:rgba(255,255,255,0.04); --code-bg:#1a1918; --code-border:#2a2825; --shadow:0 1px 3px rgba(0,0,0,0.3); }
+[data-theme="light"] { --bg:#fafaf9; --surface:#ffffff; --text:#1a1a19; --text-secondary:#78756f; --accent:#c45d3e; --accent-hover:#a84a2f; --accent-subtle:rgba(196,93,62,0.08); --border:#e8e6e1; --sidebar-bg:#f3f2ee; --sidebar-hover:rgba(0,0,0,0.04); --code-bg:#f3f2ee; --code-border:#e0ddd7; --shadow:0 1px 3px rgba(0,0,0,0.04); }
 </style>
 `;
 
@@ -355,7 +486,7 @@ function buildSidebar(data: SidebarData): string {
         const isActive = data.activePath === `/wiki/${name}` || (data.activePath === "/" && p === "index.md");
         return `<li><a href="/wiki/${encodeURIComponent(name)}" class="${isActive ? "active" : ""}">${escapeHtml(name)}</a></li>`;
       }).join("\n")
-    : `<li class="empty">No pages yet</li>`;
+    : `<li><span class="empty" style="padding:4px 28px;font-size:13px;">No pages yet</span></li>`;
 
   const sourceItems = data.sources.length > 0
     ? data.sources.map(s => {
@@ -363,19 +494,32 @@ function buildSidebar(data: SidebarData): string {
         const isActive = data.activePath === `/sources/${name}`;
         return `<li><a href="/sources/${encodeURIComponent(name)}" class="${isActive ? "active" : ""}">${escapeHtml(name)}</a></li>`;
       }).join("\n")
-    : `<li class="empty">No sources</li>`;
+    : `<li><span class="empty" style="padding:4px 28px;font-size:13px;">No sources</span></li>`;
 
   const queueBadge = data.queueCount > 0
     ? `<span class="queue-badge">${data.queueCount}</span>`
     : "";
 
+  const statusActive = data.activePath === "/status" ? " active" : "";
+
   return `
     <nav class="sidebar">
-      <h2>Wiki</h2>
-      <ul>${wikiItems}</ul>
-      <h2>Sources</h2>
-      <ul>${sourceItems}</ul>
-      <h2>Queue${queueBadge}</h2>
+      <div class="sidebar-brand">
+        <a href="/">autopedia</a>
+        <button class="theme-toggle" aria-label="Toggle theme"></button>
+      </div>
+      <div class="sidebar-section">
+        <h2>Wiki</h2>
+        <ul>${wikiItems}</ul>
+      </div>
+      <div class="sidebar-section">
+        <h2>Sources</h2>
+        <ul>${sourceItems}</ul>
+      </div>
+      <div class="sidebar-section">
+        <h2>System</h2>
+        <a href="/status" class="sidebar-nav-link${statusActive}">Status${queueBadge}</a>
+      </div>
     </nav>
   `;
 }
@@ -391,10 +535,6 @@ function renderPage(title: string, bodyHtml: string, sidebar: SidebarData): stri
 </head>
 <body>
   <div class="layout">
-    <header class="header">
-      <h1><a href="/">autopedia</a></h1>
-      <button class="theme-toggle" aria-label="Toggle theme">&#9788;/&#9789;</button>
-    </header>
     ${buildSidebar(sidebar)}
     <main class="content">
       ${bodyHtml}
