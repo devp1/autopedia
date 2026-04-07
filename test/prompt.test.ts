@@ -279,4 +279,49 @@ describe("System prompt quality", () => {
       expect(promptContent).toMatch(/handle.*user.*request.*first/i);
     });
   });
+
+  // ── Wiki Discipline ──────────────────────────────────────────
+
+  describe("Wiki discipline", () => {
+    beforeAll(() => {
+      promptContent = fs.readFileSync(
+        path.join(SCHEMA_DIR, "prompt.md"),
+        "utf-8"
+      );
+    });
+
+    it("describes ingest ripple (3-10 pages per source)", () => {
+      expect(promptContent).toContain("3-10");
+      expect(promptContent).toMatch(/ripple/i);
+    });
+
+    it("has a page creation threshold", () => {
+      expect(promptContent).toContain("2+ sources");
+    });
+
+    it("requires minimum 2 outbound wikilinks per page", () => {
+      expect(promptContent).toContain("at least 2 outbound wikilinks");
+    });
+
+    it("documents broken-link lint finding", () => {
+      expect(promptContent).toContain("broken-link:");
+    });
+
+    it("documents low-crossref lint finding", () => {
+      expect(promptContent).toContain("low-crossref:");
+    });
+
+    it("documents unsourced lint finding", () => {
+      expect(promptContent).toContain("unsourced:");
+    });
+
+    it("documents knowledge gap analysis", () => {
+      expect(promptContent).toContain("gap:");
+      expect(promptContent).toMatch(/knowledge gap/i);
+    });
+
+    it("documents compounding check", () => {
+      expect(promptContent).toMatch(/compounding check/i);
+    });
+  });
 });

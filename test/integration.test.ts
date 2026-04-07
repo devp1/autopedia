@@ -210,14 +210,14 @@ describe("Integration: full wiki workflow", () => {
     // linked-page.md should be orphan (nothing links to it)
     expect(
       lintData.findings.some(
-        (f: string) => f.includes("orphan") && f.includes("linked-page.md")
+        (f: string) => f.startsWith("orphan:") && f.includes("linked-page.md")
       )
     ).toBe(true);
 
-    // orphan-page.md has an inlink from linked-page.md
+    // orphan-page.md has an inlink from linked-page.md — not an orphan
     expect(
       lintData.findings.some(
-        (f: string) => f.includes("orphan") && f.includes("orphan-page.md")
+        (f: string) => f.startsWith("orphan:") && f.includes("orphan-page.md")
       )
     ).toBe(false);
   });

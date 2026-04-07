@@ -403,6 +403,77 @@ describe("MCP Server", () => {
       const data = JSON.parse((result.content as Array<{ text: string }>)[0].text);
       expect(data.findings).toBeDefined();
     });
+
+    it("detects broken wikilinks", async () => {
+      await client.callTool({
+        name: "apply_wiki_ops",
+        arguments: {
+          operations: [
+            { op: "create", path: "linker.md", content: "# Linker\n\nSee [[nonexistent-page]] for details." },
+          ],
+        },
+      });
+
+      const result = await client.callTool({ name: "lint", arguments: {} });
+      const data = JSON.parse((result.content as Array<{ text: string }>)[0].text);
+      const brokenLinks = data.findings.filter((f: string) => f.startsWith("broken-link:"));
+      expect(brokenLinks.length).toBeGreaterThan(0);
+      expect(brokenLinks[0]).toContain("nonexistent-page");
+    });
+
+    it("detects low cross-reference density (non-stub pages)", async () => {
+      await client.callTool({
+        name: "apply_wiki_ops",
+        arguments: {
+          operations: [
+            {
+              op: "create",
+              path: "isolated.md",
+              // Must be >4 content lines to not be exempt as a stub
+              content: "# Isolated Page\n\nThis page has no wikilinks.\nIt covers a real topic.\nWith multiple points of detail.\nAnd substantive analysis.\nBut zero cross-references to other pages.",
+            },
+          ],
+        },
+      });
+
+      const result = await client.callTool({ name: "lint", arguments: {} });
+      const data = JSON.parse((result.content as Array<{ text: string }>)[0].text);
+      const lowCrossref = data.findings.filter((f: string) => f.startsWith("low-crossref:"));
+      expect(lowCrossref.some((f: string) => f.includes("isolated.md"))).toBe(true);
+    });
+
+    it("detects unsourced claims", async () => {
+      await client.callTool({
+        name: "apply_wiki_ops",
+        arguments: {
+          operations: [
+            { op: "create", path: "nosources.md", content: "# No Sources\n\n## Key Facts\n- GPUs cost $1000\n\n## Analysis\nPrices are rising." },
+          ],
+        },
+      });
+
+      const result = await client.callTool({ name: "lint", arguments: {} });
+      const data = JSON.parse((result.content as Array<{ text: string }>)[0].text);
+      const unsourced = data.findings.filter((f: string) => f.startsWith("unsourced:"));
+      expect(unsourced.some((f: string) => f.includes("nosources.md"))).toBe(true);
+    });
+
+    it("reports knowledge gaps from broken links", async () => {
+      await client.callTool({
+        name: "apply_wiki_ops",
+        arguments: {
+          operations: [
+            { op: "create", path: "gapper.md", content: "# Gapper\n\nRelated to [[missing-topic-1]] and [[missing-topic-2]]." },
+          ],
+        },
+      });
+
+      const result = await client.callTool({ name: "lint", arguments: {} });
+      const data = JSON.parse((result.content as Array<{ text: string }>)[0].text);
+      const gaps = data.findings.filter((f: string) => f.startsWith("gap:"));
+      expect(gaps.length).toBeGreaterThan(0);
+      expect(gaps[0]).toContain("topic(s) referenced but no page exists");
+    });
   });
 
   // ── question_assumptions ──────────────────────────────────────

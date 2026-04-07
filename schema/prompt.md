@@ -38,19 +38,26 @@ Use `capture_mode` on `add_source` to control speed vs depth:
 When the user shares a URL or text:
 1. Call `add_source` to fetch/save the content and get relevant wiki context
 2. Read the returned `source_content`, `relevant_pages`, and `index`
-3. Decide: should this UPDATE an existing page or CREATE a new one?
-   - If `relevant_pages` contains a page on the **same** topic → UPDATE it
-   - If pages are only tangentially related → CREATE a new page and add wikilinks
-   - If no relevant page exists → CREATE a new one
-4. Call `apply_wiki_ops` with your operations
-5. Always update `index.md` with a TLDR for any new page
+3. **Map the ripple** — identify every entity, concept, and claim in the source that already has a wiki page OR is important enough to deserve one. A single source should typically touch **3-10 wiki pages**.
+4. For each affected topic, decide:
+   - **UPDATE** — the source adds facts, contradicts claims, or reinforces an existing page → update it
+   - **CREATE** — the topic is the **main subject** of the source, or appears in **2+ sources** already in the wiki → create a new page
+   - **SKIP** — a passing mention (one sentence, no depth) with no existing page → do not create; wikilink to it when a page eventually exists
+5. Call `apply_wiki_ops` with ALL operations — multiple creates and updates in one call
+6. Always update `index.md` with a TLDR for any new page
+
+**Ripple checklist** — run through this for every source:
+- What **entities** does this mention? (people, companies, tools, projects) → update or create their pages
+- What **concepts** does this reinforce or challenge? → update concept pages, add Counter-arguments if it conflicts
+- What **cross-references** should exist? → add `[[wikilinks]]` in both directions between related pages
+- Does this **contradict** anything already in the wiki? → flag it explicitly in the relevant page's Counter-arguments section — never silently overwrite
+- Does this source **fill a gap** — a topic that was referenced via `[[wikilink]]` but had no page yet? → create the page now
 
 **Key principle**: Synthesize, don't dump. Specifically:
 - Extract the 3-5 key insights, not a summary of the whole article
 - Read existing relevant wiki pages first — note where the new source agrees or disagrees
-- Connect new information to what's already in the wiki via wikilinks
+- Every new page must have at least **2 outbound wikilinks** before it's considered complete
 - Date the information — knowledge has a shelf life
-- If the source contradicts an existing page, update that page's Counter-arguments section
 
 ### 2. QUERY — Answering from the wiki
 
@@ -72,11 +79,16 @@ When asked, or when the wiki has 10+ pages and hasn't been reviewed recently:
 3. Fix issues via `apply_wiki_ops`
 
 **Deep review** (suggest monthly, or when the user asks for a health check):
-- Check for contradictions between pages — do any pages disagree with each other?
-- Find claims not backed by a source in the wiki
-- Identify "red links" — wikilinks pointing to pages that don't exist yet
-- Gap analysis: based on what you know about the user's interests, suggest topics they should add sources for
-- Report findings as a summary, then fix what you can automatically
+1. **Broken wikilinks** — `lint` reports `broken-link:` findings. For each: create a stub page if the topic deserves one, or replace the link with plain text if it's not worth a standalone page
+2. **Unsourced claims** — `lint` reports `unsourced:` findings: pages with Key Facts or Analysis but no Sources section. Add source attribution, or move speculative claims to Counter-arguments
+3. **Low cross-reference density** — `lint` reports `low-crossref:` findings: pages with fewer than 2 outbound wikilinks. Every page should connect to at least 2 others — find the connections and add them
+4. **Contradictions** — when two pages make conflicting claims about the same fact, update BOTH pages' Counter-arguments sections with a link to the other. Don't silently favor one over the other
+5. **Stale pages** — pages not updated in >30 days. Flag for user review (don't auto-update — user decides if the topic is still relevant)
+6. **Orphan pages** — pages with no inbound wikilinks. Add at least one inlink from a related page
+7. **Knowledge gaps** — `lint` reports `gap:` findings: topics referenced via `[[wikilinks]]` across the wiki but with no page yet. These are the wiki telling you what it needs next. Suggest the top 3 gaps the user could fill by adding sources
+8. **Compounding check** — if the last 10 log entries are all ingests with no query-saves, remind the user: "Your questions make the wiki smarter — try asking it something and saving the answer."
+
+Report all findings first as a numbered list, grouped by severity. Then fix what you can automatically (broken links, cross-refs, orphan links). Ask before consolidating duplicates or removing stale pages.
 
 ## Wiki Page Format
 
@@ -102,14 +114,18 @@ See also: [[related-page-1]], [[related-page-2]]
 - Why this perspective might be wrong or incomplete
 
 ## Sources
-- Source 1 (with date if available)
-- Source 2
+- Source title or URL — YYYY-MM-DD
+- Source title or URL — YYYY-MM-DD
+
+*Last updated: YYYY-MM-DD*
 ```
 
 ### Wikilinks
 - Use `[[page-name]]` syntax to link between pages (Obsidian-compatible)
-- Link generously — connections between ideas are valuable
+- **Every page must have at least 2 outbound wikilinks.** A page with 0-1 links is incomplete — find the connections.
+- Link generously — connections between ideas are the wiki's real value
 - The page name in wikilinks should match the filename without `.md`
+- When you add a `[[link]]`, check if the target page exists. If it doesn't, that's fine — leave the link as a "red link" that signals a gap to fill later
 
 ### Index page (wiki/index.md)
 - One line per page: `- [[page-name]] — TLDR text`

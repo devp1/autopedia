@@ -454,6 +454,70 @@ export function createServer(kbRoot: string): McpServer {
         }
       }
 
+      // Strip fenced code blocks to avoid false positives from example syntax
+      function stripCodeBlocks(text: string): string {
+        return text.replace(/```[\s\S]*?```/g, "");
+      }
+
+      // Check for broken wikilinks (links to pages that don't exist)
+      const pageSet = new Set(pages);
+      const brokenLinkTargets = new Set<string>();
+      for (const [page, content] of pageContents) {
+        const stripped = stripCodeBlocks(content);
+        const linkPattern = /\[\[([^\]]+)\]\]/g;
+        let match;
+        while ((match = linkPattern.exec(stripped)) !== null) {
+          const target = match[1];
+          const targetPath = target.endsWith(".md") ? target : `${target}.md`;
+          if (!pageSet.has(targetPath)) {
+            findings.push(`broken-link: ${page} links to [[${target}]] which does not exist`);
+            brokenLinkTargets.add(target);
+          }
+        }
+      }
+
+      // Check for low cross-reference density (fewer than 2 outbound wikilinks)
+      // Exempt: index.md, and short pages (<5 content lines = stubs/redirects)
+      for (const [page, content] of pageContents) {
+        if (page === "index.md") continue;
+        const contentLines = content.split(/\r?\n/).filter((l) => l.trim() && !l.startsWith("#"));
+        if (contentLines.length < 5) continue; // stubs/redirects exempt
+        const stripped = stripCodeBlocks(content);
+        const outbound = new Set<string>();
+        const linkPattern = /\[\[([^\]]+)\]\]/g;
+        let match;
+        while ((match = linkPattern.exec(stripped)) !== null) {
+          outbound.add(match[1]);
+        }
+        if (outbound.size < 2) {
+          findings.push(
+            `low-crossref: ${page} has ${outbound.size} outbound wikilink(s) — needs at least 2`
+          );
+        }
+      }
+
+      // Check for unsourced claims (substantive content without Sources section)
+      for (const [page, content] of pageContents) {
+        if (page === "index.md") continue;
+        const hasSourcesSection = /^## Sources/im.test(content);
+        const hasSubstantiveContent = /^## (Key Facts|Analysis)/im.test(content);
+        if (hasSubstantiveContent && hasSourcesSection) {
+          const sourcesMatch = content.match(/## Sources\r?\n([\s\S]*?)(?=\r?\n## |\s*$)/i);
+          if (sourcesMatch && !/^- .+/m.test(sourcesMatch[1])) {
+            findings.push(`unsourced: ${page} has empty Sources section`);
+          }
+        } else if (hasSubstantiveContent && !hasSourcesSection) {
+          findings.push(`unsourced: ${page} has substantive content but no Sources section`);
+        }
+      }
+
+      // Knowledge gap analysis (topics referenced but no page exists)
+      if (brokenLinkTargets.size > 0) {
+        findings.push(
+          `gap: ${brokenLinkTargets.size} topic(s) referenced but no page exists: ${[...brokenLinkTargets].slice(0, 5).join(", ")}`
+        );
+      }
+
       return {
         content: [
           {
