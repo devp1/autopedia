@@ -169,10 +169,22 @@ glob                       — File globbing
 git clone https://github.com/devp1/autopedia
 cd autopedia
 npm install
-npm test          # 119 tests
+npm test          # 139 tests
 npm run typecheck # TypeScript strict mode
 npm run lint      # ESLint
 ```
+
+## Roadmap
+
+### v0.3 (next)
+- `autopedia search <query>` — search wiki from CLI without MCP session
+- `autopedia export` — export wiki as single markdown or HTML
+- View improvements: custom Quartz layout, pinned version, watch mode
+
+### v0.4 (future)
+- Claude Code skill alongside MCP (zero-friction entry point)
+- `rules.md` as MCP resource
+- Better duplicate detection in lint
 
 ## License
 

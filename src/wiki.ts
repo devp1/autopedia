@@ -250,7 +250,7 @@ export class Wiki {
 
     // Create default files if they don't exist
     const defaults: Record<string, string> = {
-      "wiki/index.md": "# Wiki Index\n\n*No pages yet.*\n",
+      "wiki/index.md": "---\ntitle: Wiki Index\n---\n\n# Wiki Index\n\n*No pages yet.*\n",
       "ops/log.md": "# Operations Log\n",
       "ops/metrics.md":
         "# Wiki Metrics\n\n- **Page count**: 0\n- **Last updated**: never\n",
