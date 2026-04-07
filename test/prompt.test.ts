@@ -278,6 +278,11 @@ describe("System prompt quality", () => {
     it("prioritizes handling user request first", () => {
       expect(promptContent).toMatch(/handle.*user.*request.*first/i);
     });
+
+    it("uses drip-feed queue processing (never batch on startup)", () => {
+      expect(promptContent).toMatch(/never batch.process/i);
+      expect(promptContent).toContain("ONE item");
+    });
   });
 
   // ── Wiki Discipline ──────────────────────────────────────────
