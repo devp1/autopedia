@@ -8,3 +8,6 @@ coverage/
 .DS_Store
 .gstack/
 .mcp.json
+CLAUDE.md
+context-log.md
+gotchas.md
