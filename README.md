@@ -179,7 +179,7 @@ git clone https://github.com/devp1/autopedia
 cd autopedia
 npm install
 npm run build
-npm test          # 171 tests
+npm test          # 183 tests
 npm run typecheck # TypeScript strict mode
 npm run lint      # ESLint
 ```
