@@ -2,6 +2,9 @@
   "name": "autopedia",
   "version": "0.4.0",
   "description": "Personal knowledge wiki maintained by your AI tool via MCP",
+  "repository": { "type": "git", "url": "https://github.com/devp1/autopedia" },
+  "homepage": "https://github.com/devp1/autopedia",
+  "keywords": ["mcp", "wiki", "knowledge-base", "ai", "claude", "cursor", "obsidian"],
   "type": "module",
   "main": "dist/mcp.js",
   "bin": {

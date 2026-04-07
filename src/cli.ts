@@ -323,9 +323,58 @@ export function createCli(): Command {
 
       console.log(`Found ${untracked.length} new file(s):`);
       for (const { file, dir } of untracked) {
-        const entry = dir === "user" ? `note:${file}` : file;
+        const slug = file.replace(/\.[^.]+$/, ""); // strip extension for queue entry
+        const isText = /\.(md|txt|text)$/i.test(file);
+        const entry = dir === "user" ? `${isText ? "note" : "file"}:${isText ? slug : file}` : slug;
         wiki.addToQueue(entry);
-        console.log(`  + sources/${dir === "user" ? "user/notes" : "agent"}/${file}.md → queued as ${entry}`);
+        const srcDir = dir === "user" ? "user/notes" : "agent";
+        console.log(`  + sources/${srcDir}/${file} → queued as ${entry}`);
+      }
+    });
+
+  // ── remove ─────────────────────────────────────────────────
+
+  program
+    .command("remove <name>")
+    .description("Remove a wiki page or source")
+    .option("-s, --source", "Remove a source instead of a wiki page")
+    .option("-d, --dir <path>", "Path to .autopedia/ directory")
+    .option("-y, --yes", "Skip confirmation")
+    .action(async (name: string, opts: { source?: boolean; dir?: string; yes?: boolean }) => {
+      const kbRoot = resolveKbRoot(opts.dir);
+      requireKbRoot(kbRoot);
+
+      const wiki = new Wiki(kbRoot);
+
+      if (opts.source) {
+        if (!opts.yes) {
+          console.log(`Will delete source: ${name}`);
+          console.log("Press Ctrl+C to cancel, or pass -y to skip this prompt.");
+        }
+        const removed = wiki.removeSource(name);
+        if (removed) {
+          console.log(`Removed source: ${name}`);
+        } else {
+          console.error(`Source not found: ${name}`);
+          process.exitCode = 1;
+        }
+      } else {
+        if (!opts.yes) {
+          console.log(`Will delete wiki page: ${name}`);
+          console.log("Press Ctrl+C to cancel, or pass -y to skip this prompt.");
+        }
+        const removed = wiki.removePage(name);
+        if (removed) {
+          const broken = wiki.reconcileAfterDelete(name.replace(/\.md$/, ""));
+          console.log(`Removed: ${name}`);
+          if (broken.length > 0) {
+            console.log(`${broken.length} page(s) still reference [[${name.replace(/\.md$/, "")}]]: ${broken.join(", ")}`);
+            console.log("Your AI tool will fix these on next session.");
+          }
+        } else {
+          console.error(`Page not found: ${name}`);
+          process.exitCode = 1;
+        }
       }
     });
 

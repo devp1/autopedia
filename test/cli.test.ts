@@ -385,7 +385,7 @@ describe("CLI: autopedia scan", () => {
     fs.writeFileSync(path.join(kbRoot, "sources", "user", "notes", "dropped.md"), "# Dropped");
     const untracked = wiki.scanUntracked();
     expect(untracked.length).toBe(1);
-    expect(untracked[0].file).toBe("dropped");
+    expect(untracked[0].file).toBe("dropped.md");
     expect(untracked[0].dir).toBe("user");
   });
 
@@ -394,7 +394,8 @@ describe("CLI: autopedia scan", () => {
     fs.writeFileSync(path.join(kbRoot, "sources", "user", "notes", "dropped.md"), "# Dropped");
     const untracked = wiki.scanUntracked();
     for (const { file, dir } of untracked) {
-      const entry = dir === "user" ? `note:${file}` : file;
+      const slug = file.replace(/\.[^.]+$/, "");
+      const entry = dir === "user" ? `note:${slug}` : slug;
       wiki.addToQueue(entry);
     }
     // Should now be tracked

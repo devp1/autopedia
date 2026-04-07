@@ -200,6 +200,117 @@ export class Wiki {
     this.safeWrite("ops/metrics.md", content);
   }
 
+  // ── Delete operations ─────────────────────────────────────────
+
+  /** Validate a path for deletion: boundary check + ancestor symlink check */
+  private validateDeletePath(resolved: string, allowedPrefix: string, label: string): void {
+    if (!resolved.startsWith(allowedPrefix + path.sep)) {
+      throw new Error(`Delete rejected: ${label} is outside allowed directory`);
+    }
+    if (!fs.existsSync(resolved)) return;
+    if (fs.lstatSync(resolved).isSymbolicLink()) {
+      throw new Error(`Delete rejected: ${label} is a symlink`);
+    }
+    // Ancestor symlink check (same hardening as safeWrite)
+    let ancestor = path.dirname(resolved);
+    while (ancestor.length >= this.root.length) {
+      if (fs.existsSync(ancestor)) {
+        if (fs.lstatSync(ancestor).isSymbolicLink()) {
+          throw new Error(`Delete rejected: ancestor directory is a symlink`);
+        }
+        const realAncestor = fs.realpathSync(ancestor);
+        if (realAncestor !== this.root && !realAncestor.startsWith(this.root + path.sep)) {
+          throw new Error(`Delete rejected: ancestor resolves outside KB root`);
+        }
+        break;
+      }
+      ancestor = path.dirname(ancestor);
+    }
+  }
+
+  /** Delete a wiki page. Returns false if page doesn't exist. */
+  removePage(pagePath: string): boolean {
+    const filename = pagePath.endsWith(".md") ? pagePath : `${pagePath}.md`;
+    const resolved = path.resolve(this.root, "wiki", filename);
+    this.validateDeletePath(resolved, path.join(this.root, "wiki"), pagePath);
+    if (!fs.existsSync(resolved)) return false;
+    fs.unlinkSync(resolved);
+
+    // Clean up reference from index.md
+    const pageName = filename.replace(/\.md$/, "");
+    const indexPath = path.join(this.root, "wiki", "index.md");
+    if (fs.existsSync(indexPath) && pageName !== "index") {
+      const indexContent = fs.readFileSync(indexPath, "utf-8");
+      const cleaned = indexContent
+        .split("\n")
+        .filter((line) => !line.includes(`[[${pageName}]]`) && !line.includes(`[[${pageName}.md]]`))
+        .join("\n");
+      if (cleaned !== indexContent) {
+        this.safeWrite("wiki/index.md", cleaned);
+      }
+    }
+    return true;
+  }
+
+  /** Find pages that still reference a deleted page name (checks both [[name]] and [[name.md]]) */
+  reconcileAfterDelete(pageName: string): string[] {
+    const pages = this.listPages();
+    const broken: string[] = [];
+    for (const page of pages) {
+      const content = this.readPage(page);
+      if (content && (content.includes(`[[${pageName}]]`) || content.includes(`[[${pageName}.md]]`))) {
+        broken.push(page.replace(/\.md$/, ""));
+      }
+    }
+    return broken;
+  }
+
+  /** Delete a source file (any type, any directory). Returns false if not found. */
+  removeSource(slug: string): boolean {
+    if (slug.includes("..") || slug.includes("/") || slug.includes("\\") || slug.includes("\0")) {
+      throw new Error("Delete rejected: invalid slug");
+    }
+    const hasExtension = /\.[a-z0-9]+$/i.test(slug);
+    const candidates = hasExtension ? [slug] : [`${slug}.md`, slug];
+    const dirs = [
+      path.join(this.root, "sources", "agent"),
+      path.join(this.root, "sources", "user", "notes"),
+      path.join(this.root, "sources", "user"),
+    ];
+
+    for (const dir of dirs) {
+      for (const filename of candidates) {
+        const filePath = path.join(dir, filename);
+        if (!fs.existsSync(filePath)) continue;
+        this.validateDeletePath(filePath, path.join(this.root, "sources"), slug);
+        fs.unlinkSync(filePath);
+        this.removeFromQueue(slug);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Remove queue entries that match the slug exactly (as whole entry or after prefix) */
+  private removeFromQueue(slug: string): void {
+    const queuePath = path.join(this.root, "ops", "queue.md");
+    if (!fs.existsSync(queuePath)) return;
+    const content = fs.readFileSync(queuePath, "utf-8");
+    const baseSlug = slug.replace(/\.[^.]+$/, ""); // strip extension for matching
+    const filtered = content
+      .split("\n")
+      .filter((line) => {
+        const entry = line.replace(/^- \[[ x]\] /, "").trim();
+        // Match exact entry, note:slug, file:slug, or slug with extension
+        return entry !== slug && entry !== baseSlug
+          && entry !== `note:${baseSlug}` && entry !== `file:${slug}` && entry !== `file:${baseSlug}`;
+      })
+      .join("\n");
+    if (filtered !== content) {
+      this.safeWrite("ops/queue.md", filtered);
+    }
+  }
+
   // ── Source operations ─────────────────────────────────────────
 
   saveAgentSource(slug: string, content: string): void {
@@ -338,15 +449,18 @@ export class Wiki {
     const dirs: { path: string; type: "agent" | "user" }[] = [
       { path: path.join(this.root, "sources", "agent"), type: "agent" },
       { path: path.join(this.root, "sources", "user", "notes"), type: "user" },
+      { path: path.join(this.root, "sources", "user"), type: "user" },
     ];
 
     for (const { path: dirPath, type } of dirs) {
       if (!fs.existsSync(dirPath)) continue;
-      const files = fs.readdirSync(dirPath).filter((f) => f.endsWith(".md"));
+      const files = fs.readdirSync(dirPath, { withFileTypes: true })
+        .filter((f) => f.isFile())
+        .map((f) => f.name);
       for (const file of files) {
-        const slug = file.replace(/\.md$/, "");
+        const slug = file.replace(/\.[^.]+$/, ""); // strip any extension
         if (!knownSlugs.has(slug)) {
-          untracked.push({ file: slug, dir: type });
+          untracked.push({ file, dir: type });
         }
       }
     }

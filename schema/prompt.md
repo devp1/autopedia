@@ -198,6 +198,14 @@ When first connected:
 
 The user should barely notice queue processing. One item per turn. Conversation always comes first.
 
+## Deleting pages and sources
+
+- **NEVER** delete pages or sources without the user's explicit request
+- If the user says "remove X" and X is ambiguous (matches multiple pages/sources), list candidates and ask which one
+- Use `remove_page` to delete wiki pages — it auto-cleans index references and returns broken links
+- After deletion, use `apply_wiki_ops` to fix broken references in pages that still link to the deleted page
+- When lint finds orphans, **ASK** the user before removing — never auto-delete
+
 ## Error handling
 
 - If `apply_wiki_ops` fails, it means the sacred boundary rejected the write. Do NOT retry with a different path — the boundary exists for security.

@@ -673,13 +673,17 @@ function listAllSources(kbRoot: string): string[] {
   const dirs = [
     path.join(kbRoot, "sources", "agent"),
     path.join(kbRoot, "sources", "user", "notes"),
+    path.join(kbRoot, "sources", "user"),
   ];
   for (const dir of dirs) {
     if (!fs.existsSync(dir)) continue;
-    const files = fs.readdirSync(dir).filter(f => f.endsWith(".md"));
+    const files = fs.readdirSync(dir, { withFileTypes: true })
+      .filter(f => f.isFile())
+      .map(f => f.name);
     results.push(...files);
   }
-  return results.sort();
+  // Deduplicate (sources/user/ may contain .md files also in sources/user/notes/)
+  return [...new Set(results)].sort();
 }
 
 function readSource(kbRoot: string, slug: string): string | null {
@@ -687,14 +691,26 @@ function readSource(kbRoot: string, slug: string): string | null {
   if (slug.includes("..") || slug.includes("/") || slug.includes("\\") || slug.includes("\0")) {
     return null;
   }
-  const filename = slug.endsWith(".md") ? slug : `${slug}.md`;
-  const candidates = [
-    path.join(kbRoot, "sources", "agent", filename),
-    path.join(kbRoot, "sources", "user", "notes", filename),
+  // Try exact filename first, then with .md extension
+  const candidates: string[] = [];
+  const dirs = [
+    path.join(kbRoot, "sources", "agent"),
+    path.join(kbRoot, "sources", "user", "notes"),
+    path.join(kbRoot, "sources", "user"),
   ];
+  for (const dir of dirs) {
+    candidates.push(path.join(dir, slug));
+    if (!slug.endsWith(".md")) candidates.push(path.join(dir, `${slug}.md`));
+  }
   for (const filePath of candidates) {
     if (fs.existsSync(filePath) && !fs.lstatSync(filePath).isSymbolicLink()) {
-      return fs.readFileSync(filePath, "utf-8");
+      // For text files, return content. For binary, return metadata.
+      if (/\.(md|txt|text)$/i.test(filePath)) {
+        return fs.readFileSync(filePath, "utf-8");
+      }
+      const stat = fs.statSync(filePath);
+      const ext = path.extname(filePath);
+      return `# ${path.basename(filePath)}\n\n**Type:** ${ext || "unknown"}\n**Size:** ${(stat.size / 1024).toFixed(1)} KB\n\n*Binary file — view in your file manager or Obsidian.*`;
     }
   }
   return null;

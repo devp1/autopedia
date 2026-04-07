@@ -402,6 +402,52 @@ export function createServer(kbRoot: string): McpServer {
     }
   );
 
+  // ── DELETE: remove_page ─────────────────────────────────────
+
+  server.tool(
+    "remove_page",
+    "Remove a wiki page. Only use when the user explicitly asks to delete a page. Returns a reconciliation report of broken references.",
+    {
+      path: z.string().min(1).describe("Page name (e.g. 'gpu-pricing' or 'gpu-pricing.md')"),
+    },
+    async (args) => {
+      const pageName = args.path.replace(/\.md$/, "");
+      const removed = wiki.removePage(args.path);
+
+      if (!removed) {
+        return {
+          content: [
+            { type: "text" as const, text: `Page not found: ${args.path}` },
+          ],
+          isError: true,
+        };
+      }
+
+      const broken = wiki.reconcileAfterDelete(pageName);
+      wiki.appendLog(`Removed page: ${pageName}`);
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                removed: pageName,
+                broken_references: broken,
+                message:
+                  broken.length > 0
+                    ? `Removed ${pageName}. ${broken.length} page(s) still reference [[${pageName}]] — update them with apply_wiki_ops.`
+                    : `Removed ${pageName}. No broken references.`,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  );
+
   // ── LINT: lint ──────────────────────────────────────────────
 
   server.tool(

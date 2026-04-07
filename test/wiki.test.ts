@@ -311,7 +311,7 @@ describe("Wiki CRUD operations", () => {
       const notesDir = path.join(tmpDir, "sources", "user", "notes");
       fs.writeFileSync(path.join(notesDir, "dropped-note.md"), "# Dropped via Obsidian");
       const untracked = wiki.scanUntracked();
-      expect(untracked).toContainEqual({ file: "dropped-note", dir: "user" });
+      expect(untracked).toContainEqual({ file: "dropped-note.md", dir: "user" });
     });
 
     it("ignores files already in queue", () => {
@@ -319,11 +319,81 @@ describe("Wiki CRUD operations", () => {
       const notesDir = path.join(tmpDir, "sources", "user", "notes");
       fs.writeFileSync(path.join(notesDir, "tracked-file.md"), "# Tracked");
       const untracked = wiki.scanUntracked();
-      expect(untracked.find(u => u.file === "tracked-file")).toBeUndefined();
+      expect(untracked.find(u => u.file === "tracked-file.md")).toBeUndefined();
     });
 
     it("returns empty when all files are tracked", () => {
       expect(wiki.scanUntracked()).toEqual([]);
+    });
+
+    it("detects binary files in sources/user/", () => {
+      const userDir = path.join(tmpDir, "sources", "user");
+      fs.writeFileSync(path.join(userDir, "report.pdf"), "binary content");
+      const untracked = wiki.scanUntracked();
+      expect(untracked.find(u => u.file === "report.pdf")).toBeDefined();
+    });
+  });
+
+  // ── Delete operations ─────────────────────────────────────────
+
+  describe("removePage()", () => {
+    it("deletes a wiki page", () => {
+      wiki.writePage("doomed.md", "# Doomed");
+      expect(wiki.removePage("doomed")).toBe(true);
+      expect(wiki.readPage("doomed.md")).toBeNull();
+    });
+
+    it("returns false for non-existent page", () => {
+      expect(wiki.removePage("ghost")).toBe(false);
+    });
+
+    it("removes deleted page from index", () => {
+      wiki.writePage("indexed.md", "# Indexed");
+      wiki.writePage("index.md", "# Index\n\n- [[indexed]] — a page");
+      wiki.removePage("indexed");
+      const index = wiki.readPage("index.md");
+      expect(index).not.toContain("[[indexed]]");
+    });
+
+    it("rejects path traversal", () => {
+      expect(() => wiki.removePage("../etc/passwd")).toThrow("outside");
+    });
+  });
+
+  describe("reconcileAfterDelete()", () => {
+    it("finds pages with broken refs after deletion", () => {
+      wiki.writePage("linker.md", "# Linker\n\nSee [[victim]].");
+      wiki.writePage("victim.md", "# Victim");
+      wiki.removePage("victim");
+      expect(wiki.reconcileAfterDelete("victim")).toContain("linker");
+    });
+
+    it("handles [[page.md]] style refs", () => {
+      wiki.writePage("ref.md", "# Ref\n\nSee [[target.md]].");
+      expect(wiki.reconcileAfterDelete("target")).toContain("ref");
+    });
+  });
+
+  describe("removeSource()", () => {
+    it("deletes an agent source", () => {
+      wiki.saveAgentSource("test-source", "# Content");
+      expect(wiki.removeSource("test-source")).toBe(true);
+    });
+
+    it("removes queue entry when deleting source", () => {
+      wiki.addToQueue("note:queued-src");
+      const notesDir = path.join(tmpDir, "sources", "user", "notes");
+      fs.writeFileSync(path.join(notesDir, "queued-src.md"), "# Queued");
+      wiki.removeSource("queued-src");
+      expect(wiki.listUnprocessedSources()).not.toContain("note:queued-src");
+    });
+
+    it("returns false for non-existent source", () => {
+      expect(wiki.removeSource("ghost")).toBe(false);
+    });
+
+    it("rejects path traversal", () => {
+      expect(() => wiki.removeSource("../../etc/passwd")).toThrow("invalid slug");
     });
   });
 });
