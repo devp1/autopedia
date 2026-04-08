@@ -56,18 +56,31 @@ Add to your AI tool's MCP config (one-time setup):
 
 ### 4. Start using it
 
-Start a new conversation. On first session, autopedia interviews you (~30 seconds) to personalize your wiki.
+On first session, autopedia interviews you (~30 seconds) to personalize your wiki. After that, it's silent until you need it.
 
+**Add stuff anytime** (from any terminal):
+```bash
+autopedia add "GPU prices dropped 20% this quarter"
+autopedia add https://example.com/article
+autopedia add ~/research/notes.md
 ```
-You: "Add this: https://example.com/gpu-pricing-article"
-AI:  → fetches, extracts, creates wiki pages with [[wikilinks]]
 
+**Process when ready** (tell your AI tool):
+```
+You: "sync my wiki"
+AI:  Processing 1/3: gpu-pricing-note → created gpu-pricing.md
+     Processing 2/3: example.com/article → updated market-trends.md
+     Processing 3/3: notes.md → created research-notes.md
+     Done. Created 2 pages, updated 1.
+```
+
+**Ask questions anytime:**
+```
 You: "What do I know about GPU pricing?"
 AI:  → answers from YOUR research, not training data
-
-You: "Lint my wiki"
-AI:  → finds orphans, stale content, contradictions → fixes them
 ```
+
+autopedia never hijacks your conversation. It's a quiet knowledge layer — there when you need it, invisible when you don't.
 
 ## CLI Commands
 

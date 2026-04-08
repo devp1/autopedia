@@ -867,9 +867,22 @@ function handleStatus(wiki: Wiki, kbRoot: string): string {
     </div>
     ${sidebar.untrackedCount > 0 ? `<p class="empty" style="padding:0 0 16px;">💡 ${sidebar.untrackedCount} file(s) added outside autopedia — run <code>autopedia scan</code> to queue them.</p>` : ""}
     <h2>Unprocessed Queue</h2>
+    ${unprocessed.length > 0 ? `<p style="color:var(--text-secondary);font-size:13px;margin-bottom:12px;">Tell your AI tool <strong>"sync"</strong> to process these items.</p>` : ""}
     ${queueHtml}
     <h2>Recent Activity</h2>
     ${logHtml}
+    <script>
+    (function() {
+      var current = { pages: ${pages.length}, queued: ${unprocessed.length}, processed: ${processedCount} };
+      setInterval(function() {
+        fetch('/api/status').then(function(r) { return r.json(); }).then(function(d) {
+          if (d.pages !== current.pages || d.queued !== current.queued || d.processed !== current.processed) {
+            location.reload();
+          }
+        }).catch(function() {});
+      }, 5000);
+    })();
+    </script>
   `;
 
   return renderPage("Status", body, sidebar);
@@ -1057,6 +1070,18 @@ export function createDashboard(kbRoot: string): http.Server {
         };
         res.writeHead(200, { "Content-Type": mimeTypes[ext] || "application/octet-stream" });
         fs.createReadStream(resolved).pipe(res);
+        return;
+      }
+
+    // JSON API for dashboard auto-refresh
+      if (pathname === "/api/status") {
+        const pages = wiki.listPages();
+        const unprocessed = wiki.listUnprocessedSources();
+        const queuePath = path.join(kbRoot, "ops", "queue.md");
+        const queueContent = fs.existsSync(queuePath) ? fs.readFileSync(queuePath, "utf-8") : "";
+        const processedCount = queueContent.split("\n").filter((l: string) => l.startsWith("- [x] ")).length;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ pages: pages.length, queued: unprocessed.length, processed: processedCount }));
         return;
       }
 
