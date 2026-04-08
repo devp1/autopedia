@@ -593,7 +593,7 @@ export function createCli(): Command {
   program
     .name("autopedia")
     .description("Personal knowledge wiki maintained by your AI tool via MCP")
-    .version("0.4.0");
+    .version("0.5.0");
 
   // ── init ────────────────────────────────────────────────────
 
@@ -648,8 +648,8 @@ export function createCli(): Command {
       );
       console.log("");
       console.log('     { "mcpServers": { "autopedia": {');
-      console.log('         "command": "node",');
-      console.log(`         "args": ["${path.resolve(__dirname, "..", "dist", "cli.js")}", "serve"]`);
+      console.log('         "command": "autopedia",');
+      console.log('         "args": ["serve"]');
       console.log("     }}}");
       console.log("");
       console.log(

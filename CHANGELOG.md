@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.5.0
+
+### Repository Scanning
+- `autopedia add --repo <path>` or auto-detect by `.git/` presence
+- Smart file discovery: role-based scoring (manifest/docs/config/entry/source/test)
+- Gitignore-aware: respects `.gitignore` via `git ls-files`
+- Security: 21 secret-file patterns excluded, symlink validation, credential URL redaction, path hash for slug uniqueness
+- Structured markdown bundle: metadata, directory tree, git log, curated source files with dynamic code fences
+- Prompt guidance for repo→wiki page synthesis (overview, architecture, flows, operations)
+
+### CLI Lint
+- `autopedia lint` — check wiki health from terminal (no MCP session needed)
+- 7 check types: orphans, stale pages, broken links, low cross-refs, duplicates, unsourced claims, knowledge gaps
+- Extracted from MCP-only to shared `Wiki.lint()` with structured `LintFinding` interface
+
+### Source Display Names
+- Headingless notes show first meaningful line as title (skips frontmatter)
+- Consistent titles across sidebar, sources list, and source detail pages
+- Cleaned literal `\n`, capitalized first letter, stripped repo path hashes
+
+### Safety & Hardening
+- Init guard: blocks `autopedia init --dir` inside code projects (ancestor walk)
+- `.autopedia` excluded from repo scanner
+- Queue dedup: re-scanning same repo won't create duplicate queue entries
+- Graph: theme-reactive labels via CSS `var()` (works across light/dark toggle)
+- Stronger `prepublishOnly`: typecheck + lint + test + build
+
 ## v0.4.0
 
 ### Knowledge Graph

@@ -446,8 +446,10 @@ export class Wiki {
         const logLines = logContent.split("\n").filter(l => {
           const idx = l.indexOf(pageName);
           if (idx < 0) return false;
+          // Check both leading and trailing boundaries
+          const before = idx > 0 ? l[idx - 1] : " ";
           const after = l[idx + pageName.length];
-          return !after || /[^a-z0-9-]/.test(after);
+          return /[^a-z0-9-]/.test(before) && (!after || /[^a-z0-9-]/.test(after));
         });
         if (logLines.length === 0) {
           findings.push({ type: "stale", message: `${page} has never been logged` });

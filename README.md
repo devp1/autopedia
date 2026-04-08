@@ -87,7 +87,9 @@ autopedia never hijacks your conversation. It's a quiet knowledge layer — ther
 | Command | What it does |
 |---------|-------------|
 | `autopedia init` | Create `~/.autopedia/` directory structure |
-| `autopedia add <source>` | Queue a URL, text note, file, or folder |
+| `autopedia add <source>` | Queue a URL, text note, file, folder, or repo |
+| `autopedia add --repo <path>` | Scan a codebase and create an architectural bundle |
+| `autopedia lint` | Check wiki health: orphans, stale pages, broken links |
 | `autopedia scan` | Detect files added outside autopedia (Obsidian, IDE) and queue them |
 | `autopedia status` | Show wiki stats and unprocessed sources |
 | `autopedia search <query>` | Search wiki pages from the terminal |
@@ -102,6 +104,8 @@ autopedia add "GPU prices dropped 20% this quarter"     # text note
 autopedia add https://example.com/article                # URL
 autopedia add ~/research/gpu-report.pdf                  # file
 autopedia add ~/research/                                # whole folder
+autopedia add ~/code/my-project/                         # auto-detect repo (.git/)
+autopedia add --repo ~/code/my-project/                  # explicit repo mode
 ```
 
 Everything is saved instantly. Tell your AI tool "sync" to process.

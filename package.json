@@ -1,6 +1,6 @@
 {
   "name": "autopedia",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Personal knowledge wiki maintained by your AI tool via MCP",
   "repository": { "type": "git", "url": "https://github.com/devp1/autopedia" },
   "homepage": "https://github.com/devp1/autopedia",
@@ -17,7 +17,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ test/ --no-error-on-unmatched-pattern",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run typecheck && npm run lint && npm run test && npm run build"
   },
   "keywords": [
     "mcp",

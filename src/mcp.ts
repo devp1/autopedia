@@ -47,7 +47,7 @@ export function createServer(kbRoot: string): McpServer {
 
   const server = new McpServer({
     name: "autopedia",
-    version: "0.4.0",
+    version: "0.5.0",
   });
 
   // ── INGEST: add_source ──────────────────────────────────────
@@ -456,7 +456,8 @@ export function createServer(kbRoot: string): McpServer {
     {},
     async () => {
       const results = wiki.lint();
-      const findings = results.map(f => `${f.type}: ${f.message}`);
+      const typePrefix: Record<string, string> = { duplicate: "possible-duplicate" };
+      const findings = results.map(f => `${typePrefix[f.type] || f.type}: ${f.message}`);
 
       return {
         content: [
