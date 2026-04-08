@@ -555,12 +555,19 @@ const THEME_SCRIPT = `
 // ── Display name helper ─────────────────────────────────────────
 
 export function displayName(slug: string): string {
-  return slug
+  let name = slug
     .replace(/^\d{4}-\d{2}-\d{2}-/, "") // strip date prefix
     .replace(/^(?=[a-z0-9]*\d)[a-z0-9]{7,9}-/, "") // strip base36 timestamp (has digit, 7-9 chars)
     .replace(/^\d+-/, "") // strip folder-ingestion index prefix (e.g. "2-report" → "report")
+    .replace(/^(repo-.*)-[a-f0-9]{4}$/, "$1") // strip path hash suffix only on repo slugs
     .replace(/\.[a-z0-9]+$/i, "") // strip any file extension
-    .replace(/-/g, " ");
+    .replace(/\\n/g, " ") // strip literal \n from content-as-slug notes
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ") // collapse whitespace
+    .trim();
+  // Capitalize first letter
+  if (name.length > 0) name = name[0].toUpperCase() + name.slice(1);
+  return name;
 }
 
 // ── Page template ───────────────────────────────────────────────
@@ -660,8 +667,21 @@ function buildSourceTitles(kbRoot: string, sources: string[]): Map<string, strin
     if (isText) {
       const content = readSource(kbRoot, s);
       if (content) {
+        // Priority 1: H1 heading
         const heading = content.match(/^#\s+(.+)$/m);
         if (heading) { titles.set(s, heading[1].slice(0, 60)); continue; }
+        // Priority 2: first meaningful line (skip frontmatter fences, blank, formatting-only)
+        const lines = content.split(/\r?\n/);
+        let inFrontmatter = false;
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed === "---") { inFrontmatter = !inFrontmatter; continue; }
+          if (inFrontmatter || trimmed.length === 0) continue;
+          // Skip lines that are only formatting characters
+          if (/^[#*>_\-=~`]+$/.test(trimmed)) continue;
+          const titleCandidate = trimmed.slice(0, 50);
+          if (titleCandidate.length > 0) { titles.set(s, titleCandidate); break; }
+        }
       }
     }
     titles.set(s, displayName(slug));
@@ -771,9 +791,11 @@ function handleSources(wiki: Wiki, kbRoot: string): string {
     return renderPage("Sources", `<h1>Sources</h1><p class="empty">No sources saved. Paste a URL in conversation.</p>`, sidebar);
   }
 
+  const sourceTitles = sidebar.sourceTitles;
   const list = sources.map(s => {
     const name = s.replace(/\.md$/, "");
-    return `<li><a href="/sources/${encodeURIComponent(name)}" title="${escapeHtml(name)}">${escapeHtml(displayName(name))}</a></li>`;
+    const title = sourceTitles.get(s) || displayName(name);
+    return `<li><a href="/sources/${encodeURIComponent(name)}" title="${escapeHtml(name)}">${escapeHtml(title)}</a></li>`;
   }).join("\n");
 
   return renderPage("Sources", `<h1>Sources</h1><ul class="source-list">${list}</ul>`, sidebar);
@@ -806,11 +828,13 @@ function handleSourceDetail(wiki: Wiki, kbRoot: string, slug: string): { html: s
     return { html: renderPage("Not Found", `<h1>Source not found</h1><p class="empty">${escapeHtml(slug)} does not exist.</p>`, sidebar), status: 404 };
   }
 
-  const breadcrumb = `<nav class="breadcrumb"><a href="/sources">Sources</a><span class="separator">/</span><span>${escapeHtml(displayName(slug))}</span></nav>`;
+  // Use sourceTitles for consistent display across sidebar/list/detail
+  const sourceFile = slug.endsWith(".md") ? slug : `${slug}.md`;
+  const title = sidebar.sourceTitles.get(sourceFile) || sidebar.sourceTitles.get(slug) || displayName(slug);
+  const breadcrumb = `<nav class="breadcrumb"><a href="/sources">Sources</a><span class="separator">/</span><span>${escapeHtml(title)}</span></nav>`;
   const relativePath = findSourceFile(kbRoot, slug);
   const ext = relativePath ? path.extname(relativePath).toLowerCase() : "";
   const imageExts = [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"];
-  const title = displayName(slug);
 
   if (relativePath && imageExts.includes(ext)) {
     const body = `${breadcrumb}<h1>${escapeHtml(title)}</h1><img src="/files/${encodeURI(relativePath)}" alt="${escapeHtml(title)}" style="max-width:100%;border-radius:8px;margin-top:16px;" />`;

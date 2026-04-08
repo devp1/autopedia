@@ -228,22 +228,26 @@ describe("Dashboard server", () => {
 
   // ── Display name helper ────────────────────────────────────
 
-  it("displayName strips date, timestamp, index, extension, and replaces hyphens", () => {
+  it("displayName strips date, timestamp, index, extension, hash, and capitalizes", () => {
     // Date + base36 timestamp (CLI-generated slugs)
-    expect(displayName("2026-04-07-mnnzg4ak-karpathy-github-io")).toBe("karpathy github io");
-    expect(displayName("2026-04-07-mnp1589w-the-karpathy-pattern")).toBe("the karpathy pattern");
+    expect(displayName("2026-04-07-mnnzg4ak-karpathy-github-io")).toBe("Karpathy github io");
+    expect(displayName("2026-04-07-mnp1589w-the-karpathy-pattern")).toBe("The karpathy pattern");
     // Date only (MCP-generated slugs, no timestamp)
-    expect(displayName("2024-01-01-example-com")).toBe("example com");
+    expect(displayName("2024-01-01-example-com")).toBe("Example com");
     // No date prefix
-    expect(displayName("simple-slug")).toBe("simple slug");
+    expect(displayName("simple-slug")).toBe("Simple slug");
     // File extension stripping (any extension)
-    expect(displayName("2026-04-07-my-article.md")).toBe("my article");
-    expect(displayName("2026-04-07-mnp8ec0a-diagram.png")).toBe("diagram");
-    expect(displayName("2026-04-07-mnp8ec0a-2-report.pdf")).toBe("report");
+    expect(displayName("2026-04-07-my-article.md")).toBe("My article");
+    expect(displayName("2026-04-07-mnp8ec0a-diagram.png")).toBe("Diagram");
+    expect(displayName("2026-04-07-mnp8ec0a-2-report.pdf")).toBe("Report");
     // Folder ingestion index prefix stripped
-    expect(displayName("2026-04-07-mnp8ec0a-1-notes")).toBe("notes");
+    expect(displayName("2026-04-07-mnp8ec0a-1-notes")).toBe("Notes");
     // All-letter segments preserved (not mistaken for timestamp)
-    expect(displayName("2026-04-07-karpathy-github-io")).toBe("karpathy github io");
+    expect(displayName("2026-04-07-karpathy-github-io")).toBe("Karpathy github io");
+    // Path hash suffix stripped (repo slugs)
+    expect(displayName("repo-autopedia-e228")).toBe("Repo autopedia");
+    // Literal \n cleaned
+    expect(displayName("research-notes\\n\\nsome-findings")).toBe("Research notes some findings");
   });
 
   // ── Breadcrumb navigation ──────────────────────────────────

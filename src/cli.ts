@@ -857,6 +857,48 @@ export function createCli(): Command {
       }
     });
 
+  // ── lint ────────────────────────────────────────────────────
+
+  program
+    .command("lint")
+    .description("Check wiki health: orphans, stale pages, broken links, low cross-refs")
+    .option("-d, --dir <path>", "Path to .autopedia/ directory")
+    .action(async (opts: { dir?: string }) => {
+      const kbRoot = resolveKbRoot(opts.dir);
+      requireKbRoot(kbRoot);
+
+      const wiki = new Wiki(kbRoot);
+      const findings = wiki.lint();
+
+      if (findings.length === 0) {
+        console.log("autopedia lint: all clear");
+        return;
+      }
+
+      console.log("autopedia lint");
+      console.log("─".repeat(40));
+      console.log(`  ${findings.length} issue(s) found\n`);
+
+      // Group by type
+      const typeLabels: Record<string, string> = {
+        orphan: "Orphans", stale: "Stale pages", duplicate: "Possible duplicates",
+        "broken-link": "Broken links", "low-crossref": "Low cross-reference",
+        unsourced: "Unsourced claims", gap: "Knowledge gaps",
+      };
+      const grouped = new Map<string, string[]>();
+      for (const f of findings) {
+        if (!grouped.has(f.type)) grouped.set(f.type, []);
+        grouped.get(f.type)!.push(f.message);
+      }
+      for (const [type, messages] of grouped) {
+        console.log(`  ${typeLabels[type] || type}:`);
+        for (const msg of messages) {
+          console.log(`    - ${msg}`);
+        }
+        console.log();
+      }
+    });
+
   // ── scan ───────────────────────────────────────────────────
 
   program

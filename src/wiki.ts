@@ -6,6 +6,11 @@ export interface SearchResult {
   matches: string[];
 }
 
+export interface LintFinding {
+  type: "orphan" | "stale" | "duplicate" | "broken-link" | "low-crossref" | "unsourced" | "gap";
+  message: string;
+}
+
 export class Wiki {
   readonly root: string;
 
@@ -399,6 +404,121 @@ export class Wiki {
       }
     }
     return backlinks.sort();
+  }
+
+  // ── Lint ─────────────────────────────────────────────────────
+
+  lint(): LintFinding[] {
+    const pages = this.listPages();
+    const findings: LintFinding[] = [];
+
+    // Build inlink map and cache page contents
+    const inlinks = new Map<string, string[]>();
+    const pageContents = new Map<string, string>();
+    for (const page of pages) {
+      const content = this.readPage(page);
+      if (!content) continue;
+      pageContents.set(page, content);
+      for (const target of this.extractLinks(page)) {
+        const targetPath = target.endsWith(".md") ? target : `${target}.md`;
+        if (!inlinks.has(targetPath)) inlinks.set(targetPath, []);
+        inlinks.get(targetPath)!.push(page);
+      }
+    }
+
+    // Orphans (no inlinks, excluding index.md)
+    for (const page of pages) {
+      if (page === "index.md") continue;
+      if (!inlinks.has(page) || inlinks.get(page)!.length === 0) {
+        findings.push({ type: "orphan", message: `${page} has no inlinks` });
+      }
+    }
+
+    // Stale pages (>30 days since last log mention)
+    const logPath = path.join(this.root, "ops", "log.md");
+    if (fs.existsSync(logPath)) {
+      const logContent = fs.readFileSync(logPath, "utf-8");
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      for (const page of pages) {
+        const pageName = page.replace(/\.md$/, "");
+        // Match page name as whole word to avoid substring false positives
+        const logLines = logContent.split("\n").filter(l => {
+          const idx = l.indexOf(pageName);
+          if (idx < 0) return false;
+          const after = l[idx + pageName.length];
+          return !after || /[^a-z0-9-]/.test(after);
+        });
+        if (logLines.length === 0) {
+          findings.push({ type: "stale", message: `${page} has never been logged` });
+          continue;
+        }
+        const lastLine = logLines[logLines.length - 1];
+        const dateMatch = lastLine.match(/(\d{4}-\d{2}-\d{2}T[\d:.]+Z?)/);
+        if (dateMatch) {
+          const lastDate = new Date(dateMatch[1]);
+          if (lastDate < thirtyDaysAgo) {
+            findings.push({ type: "stale", message: `${page} last updated ${dateMatch[1]} (>30 days ago)` });
+          }
+        }
+      }
+    }
+
+    // Possible duplicates (similar titles)
+    const pageNames = pages.map(p => p.replace(".md", "").replace(/\//g, "-"));
+    for (let i = 0; i < pageNames.length; i++) {
+      for (let j = i + 1; j < pageNames.length; j++) {
+        if (pageNames[i].includes(pageNames[j]) || pageNames[j].includes(pageNames[i])) {
+          findings.push({ type: "duplicate", message: `${pages[i]} and ${pages[j]} may cover the same topic` });
+        }
+      }
+    }
+
+    // Broken wikilinks
+    const pageSet = new Set(pages);
+    const brokenLinkTargets = new Set<string>();
+    for (const page of pages) {
+      for (const target of this.extractLinks(page)) {
+        const targetPath = target.endsWith(".md") ? target : `${target}.md`;
+        if (!pageSet.has(targetPath)) {
+          findings.push({ type: "broken-link", message: `${page} links to [[${target}]] which does not exist` });
+          brokenLinkTargets.add(target);
+        }
+      }
+    }
+
+    // Low cross-reference density
+    for (const [page, content] of pageContents) {
+      if (page === "index.md") continue;
+      const contentLines = content.split(/\r?\n/).filter(l => l.trim() && !l.startsWith("#"));
+      if (contentLines.length < 5) continue; // stubs/redirects exempt
+      const outbound = new Set(this.extractLinks(page));
+      if (outbound.size < 2) {
+        findings.push({ type: "low-crossref", message: `${page} has ${outbound.size} outbound wikilink(s) — needs at least 2` });
+      }
+    }
+
+    // Unsourced claims
+    for (const [page, content] of pageContents) {
+      if (page === "index.md") continue;
+      const hasSourcesSection = /^## Sources/im.test(content);
+      const hasSubstantiveContent = /^## (Key Facts|Analysis)/im.test(content);
+      if (hasSubstantiveContent && hasSourcesSection) {
+        const sourcesMatch = content.match(/## Sources\r?\n([\s\S]*?)(?=\r?\n## |\s*$)/i);
+        if (sourcesMatch && !/^- .+/m.test(sourcesMatch[1])) {
+          findings.push({ type: "unsourced", message: `${page} has empty Sources section` });
+        }
+      } else if (hasSubstantiveContent && !hasSourcesSection) {
+        findings.push({ type: "unsourced", message: `${page} has substantive content but no Sources section` });
+      }
+    }
+
+    // Knowledge gaps
+    if (brokenLinkTargets.size > 0) {
+      findings.push({ type: "gap", message: `${brokenLinkTargets.size} topic(s) referenced but no page exists: ${[...brokenLinkTargets].slice(0, 5).join(", ")}` });
+    }
+
+    return findings;
   }
 
   // ── Queue & sources ──────────────────────────────────────────
