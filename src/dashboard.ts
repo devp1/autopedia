@@ -775,6 +775,25 @@ function handleSources(wiki: Wiki, kbRoot: string): string {
   return renderPage("Sources", `<h1>Sources</h1><ul class="source-list">${list}</ul>`, sidebar);
 }
 
+function findSourceFile(kbRoot: string, slug: string): string | null {
+  if (slug.includes("..") || slug.includes("/") || slug.includes("\\") || slug.includes("\0")) return null;
+  const dirs = [
+    path.join(kbRoot, "sources", "agent"),
+    path.join(kbRoot, "sources", "user", "notes"),
+    path.join(kbRoot, "sources", "user"),
+  ];
+  const candidates = [slug, `${slug}.md`];
+  for (const dir of dirs) {
+    for (const name of candidates) {
+      const filePath = path.join(dir, name);
+      if (fs.existsSync(filePath) && !fs.lstatSync(filePath).isSymbolicLink()) {
+        return path.relative(kbRoot, filePath);
+      }
+    }
+  }
+  return null;
+}
+
 function handleSourceDetail(wiki: Wiki, kbRoot: string, slug: string): { html: string; status: number } {
   const sidebar = getSidebarData(wiki, kbRoot, `/sources/${slug}`);
   const content = readSource(kbRoot, slug);
@@ -784,7 +803,22 @@ function handleSourceDetail(wiki: Wiki, kbRoot: string, slug: string): { html: s
   }
 
   const breadcrumb = `<nav class="breadcrumb"><a href="/sources">Sources</a><span class="separator">/</span><span>${escapeHtml(displayName(slug))}</span></nav>`;
-  return { html: renderPage(displayName(slug), breadcrumb + renderMarkdown(content), sidebar), status: 200 };
+  const relativePath = findSourceFile(kbRoot, slug);
+  const ext = relativePath ? path.extname(relativePath).toLowerCase() : "";
+  const imageExts = [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"];
+  const title = displayName(slug);
+
+  if (relativePath && imageExts.includes(ext)) {
+    const body = `${breadcrumb}<h1>${escapeHtml(title)}</h1><img src="/files/${encodeURI(relativePath)}" alt="${escapeHtml(title)}" style="max-width:100%;border-radius:8px;margin-top:16px;" />`;
+    return { html: renderPage(title, body, sidebar), status: 200 };
+  }
+
+  if (relativePath && ext === ".pdf") {
+    const body = `${breadcrumb}<h1>${escapeHtml(title)}</h1><embed src="/files/${encodeURI(relativePath)}" type="application/pdf" style="width:100%;height:calc(100vh - 200px);border-radius:8px;margin-top:16px;" /><p style="margin-top:8px;"><a href="/files/${encodeURI(relativePath)}">Download PDF</a></p>`;
+    return { html: renderPage(title, body, sidebar), status: 200 };
+  }
+
+  return { html: renderPage(title, breadcrumb + renderMarkdown(content), sidebar), status: 200 };
 }
 
 function handleStatus(wiki: Wiki, kbRoot: string): string {
@@ -799,13 +833,25 @@ function handleStatus(wiki: Wiki, kbRoot: string): string {
   const logLines = logContent.split("\n").filter(l => l.startsWith("- "));
   const recentLog = logLines.slice(-10);
 
+  // Queue items with type indicators
   const queueHtml = unprocessed.length > 0
     ? `<ul>${unprocessed.map(u => {
-        // URLs and prefixed entries (note:, file:) stay as-is; only slugs get displayName
+        let typeTag = "source";
+        if (u.startsWith("http")) typeTag = "url";
+        else if (u.startsWith("note:")) typeTag = "note";
+        else if (u.startsWith("file:")) typeTag = "file";
         const label = u.startsWith("http") || u.includes(":") ? u : displayName(u);
-        return `<li title="${escapeHtml(u)}">${escapeHtml(label)}</li>`;
+        return `<li title="${escapeHtml(u)}"><span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--accent);margin-right:6px;">${typeTag}</span>${escapeHtml(label)}</li>`;
       }).join("")}</ul>`
     : `<p class="empty">All caught up.</p>`;
+
+  // Processed items (from queue with [x])
+  const queuePath = path.join(kbRoot, "ops", "queue.md");
+  const queueContent = fs.existsSync(queuePath) ? fs.readFileSync(queuePath, "utf-8") : "";
+  const processedItems = queueContent.split("\n")
+    .filter(l => l.startsWith("- [x] "))
+    .map(l => l.replace("- [x] ", "").trim());
+  const processedCount = processedItems.length;
 
   const logHtml = recentLog.length > 0
     ? `<ul>${recentLog.map(l => `<li>${escapeHtml(l.replace(/^- /, ""))}</li>`).join("")}</ul>`
@@ -816,6 +862,7 @@ function handleStatus(wiki: Wiki, kbRoot: string): string {
     <div class="stat-grid">
       <div class="stat-card"><div class="label">Wiki pages</div><div class="value">${pages.length}</div></div>
       <div class="stat-card"><div class="label">Queued</div><div class="value">${unprocessed.length}</div></div>
+      <div class="stat-card"><div class="label">Processed</div><div class="value">${processedCount}</div></div>
       ${sidebar.untrackedCount > 0 ? `<div class="stat-card"><div class="label">Untracked</div><div class="value">${sidebar.untrackedCount}</div></div>` : ""}
     </div>
     ${sidebar.untrackedCount > 0 ? `<p class="empty" style="padding:0 0 16px;">💡 ${sidebar.untrackedCount} file(s) added outside autopedia — run <code>autopedia scan</code> to queue them.</p>` : ""}
@@ -975,9 +1022,46 @@ export function createDashboard(kbRoot: string): http.Server {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
     const pathname = decodeURIComponent(url.pathname);
 
+    try {
+      // Static file serving for binary sources (images, PDFs)
+      if (pathname.startsWith("/files/")) {
+        const filePath = pathname.slice(7); // remove "/files/"
+        if (filePath.includes("..") || filePath.includes("\0")) {
+          res.writeHead(400, { "Content-Type": "text/plain" });
+          res.end("Bad request");
+          return;
+        }
+        const resolved = path.resolve(kbRoot, filePath);
+        if (!resolved.startsWith(path.join(kbRoot, "sources") + path.sep)) {
+          res.writeHead(403, { "Content-Type": "text/plain" });
+          res.end("Forbidden");
+          return;
+        }
+        if (!fs.existsSync(resolved) || fs.lstatSync(resolved).isSymbolicLink()) {
+          res.writeHead(404, { "Content-Type": "text/plain" });
+          res.end("Not found");
+          return;
+        }
+        // Ancestor symlink check — prevent traversal via symlinked parent dirs
+        const realPath = fs.realpathSync(resolved);
+        if (!realPath.startsWith(kbRoot + path.sep) && realPath !== kbRoot) {
+          res.writeHead(403, { "Content-Type": "text/plain" });
+          res.end("Forbidden");
+          return;
+        }
+        const ext = path.extname(resolved).toLowerCase();
+        const mimeTypes: Record<string, string> = {
+          ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+          ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp",
+          ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown",
+        };
+        res.writeHead(200, { "Content-Type": mimeTypes[ext] || "application/octet-stream" });
+        fs.createReadStream(resolved).pipe(res);
+        return;
+      }
+
     let result: { html: string; status: number };
 
-    try {
       if (pathname === "/" || pathname === "") {
         result = { html: handleIndex(wiki, kbRoot), status: 200 };
       } else if (pathname.startsWith("/wiki/")) {

@@ -280,11 +280,21 @@ export function createCli(): Command {
       const wiki = new Wiki(kbRoot);
       const pages = wiki.listPages();
       const unprocessed = wiki.listUnprocessedSources();
+      const untracked = wiki.scanUntracked();
+
+      // Count processed items from queue
+      const queuePath = path.join(kbRoot, "ops", "queue.md");
+      const queueContent = fs.existsSync(queuePath) ? fs.readFileSync(queuePath, "utf-8") : "";
+      const processedCount = queueContent.split("\n").filter(l => l.startsWith("- [x] ")).length;
 
       console.log("autopedia status");
       console.log("─".repeat(40));
       console.log(`  Wiki pages:          ${pages.length}`);
-      console.log(`  Unprocessed sources: ${unprocessed.length}`);
+      console.log(`  Queued:              ${unprocessed.length}`);
+      console.log(`  Processed:           ${processedCount}`);
+      if (untracked.length > 0) {
+        console.log(`  Untracked:           ${untracked.length} (run 'autopedia scan')`);
+      }
 
       if (pages.length > 0) {
         console.log("");
