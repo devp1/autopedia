@@ -3,6 +3,8 @@ import { Command } from "commander";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Wiki, validateUrl } from "./wiki.js";
 import { startServer } from "./mcp.js";
@@ -87,6 +89,478 @@ function addFileToWiki(wiki: Wiki, filePath: string, date: string, ts: string, i
   }
 }
 
+// ── Repo scanning ─────────────────────────────────────────────
+
+const EXCLUDED_DIRS = new Set([
+  "node_modules", ".git", "dist", "build", ".next", "__pycache__",
+  ".venv", "venv", "target", ".cache", "coverage", ".turbo", ".vercel",
+  ".output", ".nuxt", ".svelte-kit", ".parcel-cache",
+]);
+
+const EXCLUDED_FILE_PATTERNS = [
+  /^\.env/, /\.lock$/, /\.log$/, /^package-lock\.json$/,
+  /^yarn\.lock$/, /^pnpm-lock\.yaml$/, /\.(pem|key|cert|crt|pfx|p12)$/,
+  /credential/i, /secret/i, /^\.npmrc$/, /^\.netrc$/, /^\.pypirc$/,
+  /^id_rsa/, /^id_ed25519/, /^id_ecdsa/, /^\.htpasswd$/,
+  /^\.pgpass$/, /^token$/i, /^auth$/i, /^\.docker\/config\.json$/,
+  /^\.aws\/credentials$/, /kubeconfig/i,
+];
+
+const MANIFEST_FILES = new Set([
+  "package.json", "cargo.toml", "pyproject.toml", "go.mod", "pom.xml",
+  "build.gradle", "gemfile", "requirements.txt", "setup.py", "setup.cfg",
+  "composer.json", "mix.exs", "project.clj", "deno.json",
+]);
+
+const DOC_FILES = new Set([
+  "readme.md", "architecture.md", "claude.md", "contributing.md",
+  "changelog.md", "license", "license.md",
+]);
+
+const CONFIG_FILES = new Set([
+  "tsconfig.json", "jsconfig.json", ".eslintrc", ".eslintrc.json", ".eslintrc.js",
+  "eslint.config.js", "eslint.config.mjs", "dockerfile", "docker-compose.yml",
+  "docker-compose.yaml", "makefile", ".prettierrc", ".prettierrc.json",
+  "vitest.config.ts", "jest.config.js", "jest.config.ts", "webpack.config.js",
+  "vite.config.ts", "vite.config.js", "rollup.config.js", ".gitignore",
+  "turbo.json", "nx.json",
+]);
+
+const SOURCE_EXTENSIONS = new Set([
+  ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+  ".py", ".go", ".rs", ".java", ".kt", ".scala",
+  ".rb", ".php", ".swift", ".c", ".cpp", ".h", ".hpp",
+  ".cs", ".ex", ".exs", ".clj", ".lua", ".zig", ".v",
+  ".svelte", ".vue",
+]);
+
+const GENERATED_EXTENSIONS = new Set([".map"]);
+const GENERATED_PATTERNS = [/\.d\.ts$/, /\.min\.js$/, /\.min\.css$/, /\.bundle\.js$/];
+
+const TEST_PATTERNS = [/\.test\./, /\.spec\./, /test[/\\]/, /tests[/\\]/, /__tests__[/\\]/];
+
+export type FileRole = "manifest" | "docs" | "config" | "entry" | "source" | "test" | "generated";
+
+export interface ScoredFile {
+  relativePath: string;
+  role: FileRole;
+  score: number;
+  size: number;
+  lineCount: number;
+}
+
+function classifyFile(relativePath: string, size: number): { role: FileRole; score: number } {
+  const basename = path.basename(relativePath).toLowerCase();
+  const ext = path.extname(relativePath).toLowerCase();
+
+  // Generated — always excluded
+  if (GENERATED_EXTENSIONS.has(ext) || GENERATED_PATTERNS.some(p => p.test(basename))) {
+    return { role: "generated", score: 0 };
+  }
+
+  // Manifest
+  if (MANIFEST_FILES.has(basename)) {
+    return { role: "manifest", score: 10 };
+  }
+
+  // Docs
+  if (DOC_FILES.has(basename) || relativePath.startsWith("docs/") || relativePath.startsWith("docs\\")) {
+    return { role: "docs", score: 9 };
+  }
+
+  // Config
+  if (CONFIG_FILES.has(basename)) {
+    return { role: "config", score: 7 };
+  }
+
+  // Entry points (common patterns)
+  const entryPatterns = [
+    /^src[/\\]index\.\w+$/, /^src[/\\]main\.\w+$/, /^src[/\\]app\.\w+$/,
+    /^src[/\\]lib\.\w+$/, /^cmd[/\\]main\.\w+$/, /^main\.\w+$/,
+    /^index\.\w+$/, /^app\.\w+$/,
+  ];
+  if (SOURCE_EXTENSIONS.has(ext) && entryPatterns.some(p => p.test(relativePath))) {
+    return { role: "entry", score: 8 };
+  }
+
+  // Test
+  if (SOURCE_EXTENSIONS.has(ext) && TEST_PATTERNS.some(p => p.test(relativePath))) {
+    // Prefer medium-sized test files for better signal
+    const sizeScore = size > 500 && size < 50000 ? 3 : 2;
+    return { role: "test", score: sizeScore };
+  }
+
+  // Source — score by size (medium files are most informative)
+  if (SOURCE_EXTENSIONS.has(ext)) {
+    let sizeScore = 5;
+    if (size < 100) sizeScore = 3;        // Tiny — probably re-exports
+    else if (size > 100000) sizeScore = 3; // Huge — probably generated/vendored
+    else if (size > 2000 && size < 30000) sizeScore = 6; // Sweet spot
+    return { role: "source", score: sizeScore };
+  }
+
+  // Markdown/text in non-doc locations
+  if (ext === ".md" || ext === ".txt") {
+    return { role: "docs", score: 4 };
+  }
+
+  // Unknown extension — low score source
+  return { role: "source", score: 2 };
+}
+
+function isExcludedFile(basename: string): boolean {
+  return EXCLUDED_FILE_PATTERNS.some(p => p.test(basename));
+}
+
+export function discoverFiles(repoPath: string, maxDepth = 5): { files: ScoredFile[]; skipped: number } {
+  const results: ScoredFile[] = [];
+  let skipped = 0;
+
+  function walk(dir: string, depth: number): void {
+    if (depth > maxDepth) return;
+
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      skipped++;
+      return; // Permission denied, etc.
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+
+      // Skip symlinks everywhere
+      if (entry.isSymbolicLink()) continue;
+
+      if (entry.isDirectory()) {
+        if (!EXCLUDED_DIRS.has(entry.name.toLowerCase())) {
+          walk(fullPath, depth + 1);
+        }
+        continue;
+      }
+
+      if (!entry.isFile()) continue;
+      if (isExcludedFile(entry.name)) continue;
+
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(fullPath);
+      } catch {
+        continue;
+      }
+
+      // Skip files over 1MB (likely binary or vendored)
+      if (stat.size > 1024 * 1024) continue;
+
+      const relativePath = path.relative(repoPath, fullPath).replace(/\\/g, "/");
+      const { role, score } = classifyFile(relativePath, stat.size);
+
+      if (role === "generated") continue;
+
+      // Read content, detect binary (null bytes), count lines
+      let lineCount = 0;
+      try {
+        const content = fs.readFileSync(fullPath, "utf-8");
+        if (content.includes("\0")) continue; // Binary file — skip
+        lineCount = content.split("\n").length;
+      } catch {
+        continue; // Can't read as text — skip
+      }
+
+      results.push({ relativePath, role, score, size: stat.size, lineCount });
+    }
+  }
+
+  walk(repoPath, 0);
+  return { files: results, skipped };
+}
+
+function selectFiles(files: ScoredFile[]): ScoredFile[] {
+  const selected: ScoredFile[] = [];
+  let totalLines = 0;
+  const MAX_LINES = 5000;
+  const MAX_SOURCE = 15;
+  const MAX_TEST = 3;
+
+  // 1. Always include manifests, docs, configs, entries (budget-aware)
+  const priority = files
+    .filter(f => ["manifest", "docs", "config", "entry"].includes(f.role))
+    .sort((a, b) => b.score - a.score);
+
+  for (const f of priority) {
+    // Docs/configs truncated to 500 lines in bundle, so budget accordingly
+    const budgetLines = Math.min(f.lineCount, 500);
+    if (totalLines + budgetLines > MAX_LINES && selected.length > 0) break;
+    selected.push(f);
+    totalLines += budgetLines;
+  }
+
+  // 2. Source files — prefer diverse directories
+  const sources = files
+    .filter(f => f.role === "source")
+    .sort((a, b) => b.score - a.score);
+
+  const selectedDirs = new Set<string>();
+  let sourceCount = 0;
+
+  for (const f of sources) {
+    if (sourceCount >= MAX_SOURCE || totalLines >= MAX_LINES) break;
+    const dir = path.dirname(f.relativePath);
+    // Prefer files from directories we haven't seen yet
+    const dirPenalty = selectedDirs.has(dir) ? 0.5 : 1;
+    if (dirPenalty < 1 && sourceCount > 5) {
+      // After 5 sources, skip same-dir files if we have options
+      const remaining = sources.filter(
+        s => !selected.includes(s) && !selectedDirs.has(path.dirname(s.relativePath))
+      );
+      if (remaining.length > 0) continue;
+    }
+    selected.push(f);
+    selectedDirs.add(dir);
+    totalLines += Math.min(f.lineCount, 200); // Budget for truncation
+    sourceCount++;
+  }
+
+  // 3. Test files (for coverage signal)
+  const tests = files
+    .filter(f => f.role === "test")
+    .sort((a, b) => b.score - a.score);
+
+  let testCount = 0;
+  for (const t of tests) {
+    if (testCount >= MAX_TEST || totalLines >= MAX_LINES) break;
+    selected.push(t);
+    totalLines += Math.min(t.lineCount, 200);
+    testCount++;
+  }
+
+  return selected;
+}
+
+function redactAbsolutePaths(content: string, repoPath: string): string {
+  // Case-insensitive on Windows (drive letters vary in case)
+  const flags = process.platform === "win32" ? "gi" : "g";
+
+  // Replace absolute repo path with <repo>/
+  const normalized = repoPath.replace(/\\/g, "/");
+  let result = content.replace(new RegExp(escapeRegExp(normalized), flags), "<repo>");
+  // Also replace backslash version on Windows
+  if (path.sep === "\\") {
+    result = result.replace(new RegExp(escapeRegExp(repoPath), flags), "<repo>");
+  }
+  // Replace home directory
+  const home = os.homedir();
+  const homeNorm = home.replace(/\\/g, "/");
+  result = result.replace(new RegExp(escapeRegExp(homeNorm), flags), "~");
+  if (path.sep === "\\") {
+    result = result.replace(new RegExp(escapeRegExp(home), flags), "~");
+  }
+  return result;
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getDirectoryTree(repoPath: string, maxDepth = 3): string {
+  const lines: string[] = [];
+
+  function walk(dir: string, prefix: string, depth: number): void {
+    if (depth > maxDepth) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    const dirs = entries
+      .filter(e => e.isDirectory() && !e.isSymbolicLink() && !EXCLUDED_DIRS.has(e.name.toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    for (let i = 0; i < dirs.length; i++) {
+      const isLast = i === dirs.length - 1;
+      const connector = isLast ? "└── " : "├── ";
+      const childPrefix = isLast ? "    " : "│   ";
+      lines.push(`${prefix}${connector}${dirs[i].name}/`);
+      walk(path.join(dir, dirs[i].name), prefix + childPrefix, depth + 1);
+    }
+  }
+
+  lines.push(path.basename(repoPath) + "/");
+  walk(repoPath, "", 0);
+  return lines.join("\n");
+}
+
+function getLanguageBreakdown(files: ScoredFile[]): string {
+  const counts = new Map<string, number>();
+  for (const f of files) {
+    const ext = path.extname(f.relativePath).toLowerCase();
+    if (ext && SOURCE_EXTENSIONS.has(ext)) {
+      counts.set(ext, (counts.get(ext) || 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([ext, count]) => `${ext}: ${count}`)
+    .join(", ");
+}
+
+function getGitMetadata(repoPath: string): { remote: string; log: string; head: string } {
+  let remote = "(no remote)";
+  let log = "(no git history)";
+  let head = "(unknown)";
+
+  try {
+    remote = execFileSync("git", ["remote", "get-url", "origin"], {
+      cwd: repoPath, stdio: ["pipe", "pipe", "pipe"], timeout: 5000,
+    }).toString().trim();
+    // Redact credentials from URLs like https://user:token@github.com/...
+    remote = remote.replace(/\/\/[^@/]+@/, "//***@");
+  } catch { /* no remote */ }
+
+  try {
+    log = execFileSync("git", ["log", "--oneline", "-20"], {
+      cwd: repoPath, stdio: ["pipe", "pipe", "pipe"], timeout: 5000,
+    }).toString().trim();
+  } catch { /* no git */ }
+
+  try {
+    head = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+      cwd: repoPath, stdio: ["pipe", "pipe", "pipe"], timeout: 5000,
+    }).toString().trim();
+  } catch { /* no git */ }
+
+  return { remote, log, head };
+}
+
+export function formatBundle(repoPath: string, allFiles: ScoredFile[], selected: ScoredFile[]): string {
+  const repoName = path.basename(repoPath);
+  const git = getGitMetadata(repoPath);
+  const langBreakdown = getLanguageBreakdown(allFiles);
+  const tree = getDirectoryTree(repoPath);
+
+  const sections: string[] = [];
+
+  // Header
+  sections.push(`# Repository: ${repoName}\n`);
+
+  // Metadata
+  sections.push(`## Metadata\n`);
+  sections.push(`- **Remote**: ${git.remote}`);
+  sections.push(`- **HEAD**: ${git.head}`);
+  sections.push(`- **Total files scanned**: ${allFiles.length}`);
+  sections.push(`- **Files selected**: ${selected.length}`);
+  sections.push(`- **Languages**: ${langBreakdown || "(none detected)"}`);
+  sections.push("");
+
+  // Directory tree
+  sections.push(`## Directory Structure\n`);
+  sections.push("```");
+  sections.push(tree);
+  sections.push("```\n");
+
+  // Git log
+  if (git.log !== "(no git history)") {
+    sections.push(`## Recent Commits\n`);
+    sections.push("```");
+    sections.push(git.log);
+    sections.push("```\n");
+  }
+
+  // Files grouped by role
+  const roleOrder: FileRole[] = ["manifest", "docs", "config", "entry", "source", "test"];
+  const roleLabels: Record<FileRole, string> = {
+    manifest: "Manifests", docs: "Documentation", config: "Configuration",
+    entry: "Entry Points", source: "Source Files", test: "Test Files", generated: "Generated",
+  };
+
+  for (const role of roleOrder) {
+    const group = selected.filter(f => f.role === role);
+    if (group.length === 0) continue;
+
+    sections.push(`## ${roleLabels[role]}\n`);
+
+    for (const f of group) {
+      const filePath = path.join(repoPath, f.relativePath);
+      let content: string;
+      try {
+        // Re-check symlink at read time (TOCTOU mitigation)
+        // Check the file itself AND all ancestors up to repoPath
+        if (fs.lstatSync(filePath).isSymbolicLink()) continue;
+        let ancestor = path.dirname(filePath);
+        let escaped = false;
+        while (ancestor.length > repoPath.length) {
+          if (fs.lstatSync(ancestor).isSymbolicLink()) { escaped = true; break; }
+          ancestor = path.dirname(ancestor);
+        }
+        if (escaped) continue;
+        // Verify realpath stays inside repo
+        const realFile = fs.realpathSync(filePath);
+        const realRepo = fs.realpathSync(repoPath);
+        if (!realFile.startsWith(realRepo + path.sep) && realFile !== realRepo) continue;
+        content = fs.readFileSync(filePath, "utf-8");
+      } catch {
+        continue;
+      }
+
+      // Truncate files by role: source/test=200, docs/config=500, manifest=full
+      const lines = content.split("\n");
+      const maxLines = ["source", "test"].includes(f.role) ? 200
+        : ["docs", "config"].includes(f.role) ? 500
+        : Infinity;
+      const truncated = lines.length > maxLines;
+      const displayContent = truncated
+        ? lines.slice(0, maxLines).join("\n") + `\n... (${lines.length - maxLines} more lines)`
+        : content;
+
+      // Redact absolute paths
+      const safe = redactAbsolutePaths(displayContent, repoPath);
+
+      const ext = path.extname(f.relativePath).replace(".", "");
+      sections.push(`### ${f.relativePath} (${f.role}, ${f.lineCount} lines)\n`);
+      sections.push("```" + ext);
+      sections.push(safe);
+      sections.push("```\n");
+    }
+  }
+
+  return sections.join("\n");
+}
+
+export function scanRepo(repoPath: string): { bundle: string; stats: { totalFiles: number; selectedFiles: number; totalLines: number; languages: string; skipped: number } } {
+  const { files: allFiles, skipped } = discoverFiles(repoPath);
+  const selected = selectFiles(allFiles);
+
+  const bundle = formatBundle(repoPath, allFiles, selected);
+  const totalLines = selected.reduce((sum, f) => sum + f.lineCount, 0);
+  const languages = getLanguageBreakdown(allFiles);
+
+  return {
+    bundle,
+    stats: {
+      totalFiles: allFiles.length,
+      selectedFiles: selected.length,
+      totalLines,
+      languages: languages || "(none detected)",
+      skipped,
+    },
+  };
+}
+
+export function isRepo(dirPath: string): boolean {
+  // Has .git/ directory
+  if (fs.existsSync(path.join(dirPath, ".git"))) return true;
+  // Has a manifest file
+  try {
+    const entries = fs.readdirSync(dirPath);
+    return entries.some(e => MANIFEST_FILES.has(e.toLowerCase()));
+  } catch {
+    return false;
+  }
+}
+
 export function createCli(): Command {
   const program = new Command();
 
@@ -141,9 +615,10 @@ export function createCli(): Command {
 
   program
     .command("add <source>")
-    .description("Queue a URL, text note, file, or folder for wiki processing")
+    .description("Queue a URL, text note, file, folder, or repo for wiki processing")
     .option("-d, --dir <path>", "Path to .autopedia/ directory")
-    .action(async (source: string, opts: { dir?: string }) => {
+    .option("-r, --repo", "Force repository scanning mode")
+    .action(async (source: string, opts: { dir?: string; repo?: boolean }) => {
       const kbRoot = resolveKbRoot(opts.dir);
       requireKbRoot(kbRoot);
 
@@ -151,6 +626,16 @@ export function createCli(): Command {
       const date = new Date().toISOString().split("T")[0];
       const ts = Date.now().toString(36);
       const isUrl = source.startsWith("http://") || source.startsWith("https://");
+      const resolved = path.resolve(source);
+      const isDir = fs.existsSync(resolved) && fs.statSync(resolved).isDirectory();
+      // Auto-detect repos only by .git/ (strong signal); --repo flag for manifest-only repos
+      const useRepoMode = opts.repo || (isDir && fs.existsSync(path.join(resolved, ".git")));
+
+      // --repo flag validation: must be a directory
+      if (opts.repo && !isDir) {
+        console.error(`Error: --repo requires a directory path. "${source}" is not a directory.`);
+        process.exit(1);
+      }
 
       if (isUrl) {
         // URL — validate + queue (no fetch)
@@ -164,9 +649,22 @@ export function createCli(): Command {
         }
         wiki.addToQueue(source);
         console.log(`✓ Queued: ${source}`);
-      } else if (fs.existsSync(path.resolve(source)) && fs.statSync(path.resolve(source)).isDirectory()) {
-        // Directory — scan and add all files
-        const resolved = path.resolve(source);
+      } else if (useRepoMode && isDir) {
+        // Repository — scan, bundle, save, queue
+        const repoName = path.basename(resolved);
+        const { bundle, stats } = scanRepo(resolved);
+        // Include 4-char hash of full path for uniqueness (two repos named "app" in different locations)
+        const pathHash = createHash("sha256").update(resolved).digest("hex").slice(0, 4);
+        const slug = `repo-${repoName.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40).replace(/-+$/, "")}-${pathHash}`;
+        wiki.saveAgentSource(slug, bundle);
+        wiki.addToQueue(`repo:${slug}`);
+        console.log(`✓ Scanned ${repoName}/ (${stats.totalFiles} source files, ${stats.selectedFiles} selected, ${stats.languages})`);
+        console.log(`  Bundle: ${stats.selectedFiles} files, ${stats.totalLines} lines`);
+        if (stats.skipped > 0) {
+          console.log(`  Warning: ${stats.skipped} directories were unreadable (permission denied)`);
+        }
+      } else if (isDir) {
+        // Directory (non-repo) — scan and add all files
         const entries = fs.readdirSync(resolved).filter((f) => {
           const full = path.join(resolved, f);
           return fs.statSync(full).isFile() && !fs.lstatSync(full).isSymbolicLink();
@@ -181,9 +679,9 @@ export function createCli(): Command {
           count++;
         }
         console.log(`✓ Added ${count} file(s) from ${path.basename(resolved)}/`);
-      } else if (fs.existsSync(path.resolve(source)) && fs.statSync(path.resolve(source)).isFile()) {
+      } else if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
         // Single file
-        addFileToWiki(wiki, path.resolve(source), date, ts, 0);
+        addFileToWiki(wiki, resolved, date, ts, 0);
         console.log(`✓ Added: ${path.basename(source)}`);
       } else {
         // Text note (fallback — backward compatible)

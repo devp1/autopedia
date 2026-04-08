@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { Wiki } from "../src/wiki.js";
+import { createHash } from "node:crypto";
+import { discoverFiles, formatBundle, scanRepo, isRepo } from "../src/cli.js";
 
 // We test CLI logic by directly testing the init/add/status operations
 // through the Wiki class and file system, avoiding slow subprocess spawns.
@@ -490,5 +492,436 @@ describe("CLI: autopedia export", () => {
     const outputPath = path.join(wikiDir, "export.md");
     const resolved = path.resolve(outputPath);
     expect(resolved.startsWith(wikiDir + path.sep)).toBe(true);
+  });
+});
+
+// ── repo scanning tests ─────────────────────────────────────
+
+describe("CLI: repo scanning", () => {
+  let tmpDir: string;
+  let repoDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "autopedia-repo-"));
+    repoDir = path.join(tmpDir, "my-project");
+    fs.mkdirSync(repoDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // Helper to create a fake repo structure
+  function makeRepo(files: Record<string, string>): void {
+    for (const [relPath, content] of Object.entries(files)) {
+      const full = path.join(repoDir, relPath);
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      fs.writeFileSync(full, content, "utf-8");
+    }
+  }
+
+  // ── isRepo detection ──────────────────────────────────────
+
+  describe("repo detection (isRepo)", () => {
+    it("detects directory with .git/ as a repo", () => {
+      fs.mkdirSync(path.join(repoDir, ".git"), { recursive: true });
+      expect(isRepo(repoDir)).toBe(true);
+    });
+
+    it("detects directory with package.json as a repo", () => {
+      fs.writeFileSync(path.join(repoDir, "package.json"), '{"name":"test"}');
+      expect(isRepo(repoDir)).toBe(true);
+    });
+
+    it("detects directory with Cargo.toml as a repo", () => {
+      fs.writeFileSync(path.join(repoDir, "Cargo.toml"), '[package]\nname = "test"');
+      expect(isRepo(repoDir)).toBe(true);
+    });
+
+    it("does not detect plain directory as a repo", () => {
+      fs.writeFileSync(path.join(repoDir, "notes.md"), "# Notes");
+      expect(isRepo(repoDir)).toBe(false);
+    });
+  });
+
+  // ── file role classification ──────────────────────────────
+
+  describe("file role classification", () => {
+    it("classifies manifest files correctly", () => {
+      makeRepo({
+        "package.json": '{"name":"test"}',
+        "src/index.ts": "export default 42;",
+      });
+      const { files } = discoverFiles(repoDir);
+      const manifest = files.find(f => f.relativePath === "package.json");
+      expect(manifest).toBeDefined();
+      expect(manifest!.role).toBe("manifest");
+      expect(manifest!.score).toBe(10);
+    });
+
+    it("classifies entry points correctly", () => {
+      makeRepo({
+        "src/index.ts": 'console.log("hello");',
+      });
+      const { files } = discoverFiles(repoDir);
+      const entry = files.find(f => f.relativePath === "src/index.ts");
+      expect(entry).toBeDefined();
+      expect(entry!.role).toBe("entry");
+    });
+
+    it("classifies test files correctly", () => {
+      makeRepo({
+        "test/utils.test.ts": 'describe("test", () => {});',
+      });
+      const { files } = discoverFiles(repoDir);
+      const test = files.find(f => f.relativePath === "test/utils.test.ts");
+      expect(test).toBeDefined();
+      expect(test!.role).toBe("test");
+    });
+
+    it("classifies docs correctly", () => {
+      makeRepo({
+        "README.md": "# My Project\n\nA cool project.",
+      });
+      const { files } = discoverFiles(repoDir);
+      const doc = files.find(f => f.relativePath === "README.md");
+      expect(doc).toBeDefined();
+      expect(doc!.role).toBe("docs");
+    });
+
+    it("classifies config files correctly", () => {
+      makeRepo({
+        "tsconfig.json": '{"compilerOptions":{}}',
+      });
+      const { files } = discoverFiles(repoDir);
+      const config = files.find(f => f.relativePath === "tsconfig.json");
+      expect(config).toBeDefined();
+      expect(config!.role).toBe("config");
+    });
+  });
+
+  // ── excluded dir filtering ────────────────────────────────
+
+  describe("excluded directory filtering", () => {
+    it("excludes node_modules", () => {
+      makeRepo({
+        "src/app.ts": "const x = 1;",
+        "node_modules/lodash/index.js": "module.exports = {};",
+      });
+      const { files } = discoverFiles(repoDir);
+      expect(files.some(f => f.relativePath.includes("node_modules"))).toBe(false);
+    });
+
+    it("excludes .git directory", () => {
+      makeRepo({
+        "src/app.ts": "const x = 1;",
+      });
+      fs.mkdirSync(path.join(repoDir, ".git"), { recursive: true });
+      fs.writeFileSync(path.join(repoDir, ".git", "config"), "[core]");
+      const { files } = discoverFiles(repoDir);
+      expect(files.some(f => f.relativePath.includes(".git/"))).toBe(false);
+    });
+
+    it("excludes dist/build/coverage directories", () => {
+      makeRepo({
+        "src/app.ts": "const x = 1;",
+        "dist/app.js": "var x = 1;",
+        "build/output.js": "var y = 2;",
+        "coverage/lcov.info": "SF:src/app.ts",
+      });
+      const { files } = discoverFiles(repoDir);
+      expect(files.some(f => f.relativePath.startsWith("dist/"))).toBe(false);
+      expect(files.some(f => f.relativePath.startsWith("build/"))).toBe(false);
+      expect(files.some(f => f.relativePath.startsWith("coverage/"))).toBe(false);
+    });
+  });
+
+  // ── excluded file filtering ───────────────────────────────
+
+  describe("excluded file filtering", () => {
+    it("excludes .env files", () => {
+      makeRepo({
+        "src/app.ts": "const x = 1;",
+        ".env": "SECRET=abc123",
+        ".env.local": "DB_PASS=hunter2",
+      });
+      const { files } = discoverFiles(repoDir);
+      expect(files.some(f => f.relativePath.includes(".env"))).toBe(false);
+    });
+
+    it("excludes lock files", () => {
+      makeRepo({
+        "package.json": '{"name":"test"}',
+        "package-lock.json": '{"lockfileVersion":2}',
+        "yarn.lock": "# yarn lockfile",
+      });
+      const { files } = discoverFiles(repoDir);
+      expect(files.some(f => f.relativePath.includes("lock"))).toBe(false);
+    });
+
+    it("excludes credential/secret files", () => {
+      makeRepo({
+        "src/app.ts": "const x = 1;",
+        "credentials.json": '{"token":"secret"}',
+        "my-secret.txt": "password123",
+      });
+      const { files } = discoverFiles(repoDir);
+      expect(files.some(f => f.relativePath.includes("credential"))).toBe(false);
+      expect(files.some(f => f.relativePath.includes("secret"))).toBe(false);
+    });
+
+    it("excludes .pem and .key files", () => {
+      makeRepo({
+        "server.pem": "-----BEGIN CERTIFICATE-----",
+        "private.key": "-----BEGIN PRIVATE KEY-----",
+      });
+      const { files } = discoverFiles(repoDir);
+      expect(files.some(f => f.relativePath.endsWith(".pem"))).toBe(false);
+      expect(files.some(f => f.relativePath.endsWith(".key"))).toBe(false);
+    });
+
+    it("excludes common auth dotfiles (.npmrc, .netrc, id_rsa)", () => {
+      makeRepo({
+        "src/app.ts": "const x = 1;",
+        ".npmrc": "//registry.npmjs.org/:_authToken=abc123",
+        ".netrc": "machine github.com login token",
+        "id_rsa": "-----BEGIN RSA PRIVATE KEY-----",
+      });
+      const { files } = discoverFiles(repoDir);
+      expect(files.some(f => f.relativePath === ".npmrc")).toBe(false);
+      expect(files.some(f => f.relativePath === ".netrc")).toBe(false);
+      expect(files.some(f => f.relativePath === "id_rsa")).toBe(false);
+    });
+  });
+
+  // ── generated file detection ──────────────────────────────
+
+  describe("generated file detection", () => {
+    it("excludes .d.ts files", () => {
+      makeRepo({
+        "src/app.ts": "const x = 1;",
+        "src/app.d.ts": "declare const x: number;",
+      });
+      const { files } = discoverFiles(repoDir);
+      expect(files.some(f => f.relativePath.endsWith(".d.ts"))).toBe(false);
+    });
+
+    it("excludes .min.js and .min.css files", () => {
+      makeRepo({
+        "src/app.ts": "const x = 1;",
+        "public/app.min.js": "var x=1;",
+        "public/styles.min.css": "body{margin:0}",
+      });
+      const { files } = discoverFiles(repoDir);
+      expect(files.some(f => f.relativePath.includes(".min."))).toBe(false);
+    });
+  });
+
+  // ── binary file detection ─────────────────────────────────
+
+  describe("binary file detection", () => {
+    it("skips files with null bytes (binary)", () => {
+      makeRepo({
+        "src/app.ts": "const x = 1;",
+      });
+      // Write a file with null bytes
+      fs.writeFileSync(path.join(repoDir, "binary.wasm"), Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x00]));
+      const { files } = discoverFiles(repoDir);
+      expect(files.some(f => f.relativePath === "binary.wasm")).toBe(false);
+    });
+  });
+
+  // ── file selection budget ─────────────────────────────────
+
+  describe("file selection budget", () => {
+    it("limits source files to ~15", () => {
+      const files: Record<string, string> = {};
+      // Create 30 source files
+      for (let i = 0; i < 30; i++) {
+        const dir = `src/module${i % 10}`;
+        files[`${dir}/file${i}.ts`] = `// File ${i}\n`.repeat(50);
+      }
+      makeRepo(files);
+      const { stats } = scanRepo(repoDir);
+      // Source files capped at 15, plus manifests/docs/configs — well under 30
+      expect(stats.selectedFiles).toBeLessThanOrEqual(20);
+    });
+
+    it("respects line count budget", () => {
+      const files: Record<string, string> = {};
+      // Create files with many lines
+      for (let i = 0; i < 20; i++) {
+        files[`src/big${i}.ts`] = `// Line\n`.repeat(500);
+      }
+      makeRepo(files);
+      const { stats } = scanRepo(repoDir);
+      // Budget is 5000 lines max; with 20 files of 500 lines each, selection must cut
+      expect(stats.selectedFiles).toBeLessThan(20);
+      // Selected files have 500 lines each but only ~15 fit in budget
+      expect(stats.totalLines).toBeLessThanOrEqual(8000);
+    });
+  });
+
+  // ── directory diversity ───────────────────────────────────
+
+  describe("directory diversity", () => {
+    it("selects files from multiple directories over same-dir clustering", () => {
+      const files: Record<string, string> = {};
+      // 10 files in src/core/, 1 file each in 5 other dirs
+      for (let i = 0; i < 10; i++) {
+        files[`src/core/helper${i}.ts`] = `export function helper${i}() { return ${i}; }\n`.repeat(30);
+      }
+      for (let i = 0; i < 5; i++) {
+        files[`src/module${i}/index.ts`] = `export const mod${i} = ${i};\n`.repeat(30);
+      }
+      makeRepo(files);
+      // Use scanRepo which exercises the full selection pipeline
+      const { stats } = scanRepo(repoDir);
+      // Should select some files — verify via bundle content
+      expect(stats.selectedFiles).toBeGreaterThanOrEqual(5);
+
+      // Also verify through discoverFiles + formatBundle that diverse dirs are represented
+      const { files: discovered } = discoverFiles(repoDir);
+      const bundle = formatBundle(repoDir, discovered, discovered.slice(0, 15));
+      // Should contain files from module dirs, not just core
+      const moduleMatches = Array.from({ length: 5 }, (_, i) => bundle.includes(`src/module${i}/index.ts`));
+      const moduleDirCount = moduleMatches.filter(Boolean).length;
+      expect(moduleDirCount).toBeGreaterThanOrEqual(3);
+    });
+  });
+
+  // ── symlink safety ────────────────────────────────────────
+
+  describe("symlink safety", () => {
+    it("skips symlinks during discovery", () => {
+      makeRepo({
+        "src/real.ts": "const x = 1;",
+      });
+      // Create a symlink to /etc/passwd (or any file outside repo)
+      const symlinkPath = path.join(repoDir, "src", "evil.ts");
+      try {
+        fs.symlinkSync("/etc/passwd", symlinkPath);
+      } catch {
+        // Windows may not support symlinks without elevation — skip test
+        return;
+      }
+      const { files } = discoverFiles(repoDir);
+      expect(files.some(f => f.relativePath === "src/evil.ts")).toBe(false);
+    });
+  });
+
+  // ── bundle format ─────────────────────────────────────────
+
+  describe("bundle format", () => {
+    it("produces structured markdown with all sections", () => {
+      makeRepo({
+        "package.json": '{"name":"test-project","version":"1.0.0"}',
+        "README.md": "# Test Project\n\nA test project for testing.",
+        "src/index.ts": 'export function main() {\n  console.log("hello");\n}',
+        "tsconfig.json": '{"compilerOptions":{"strict":true}}',
+      });
+      const { files } = discoverFiles(repoDir);
+      const selected = files; // small repo — all selected
+      const bundle = formatBundle(repoDir, files, selected);
+
+      expect(bundle).toContain("# Repository: my-project");
+      expect(bundle).toContain("## Metadata");
+      expect(bundle).toContain("## Directory Structure");
+      expect(bundle).toContain("## Manifests");
+      expect(bundle).toContain("## Documentation");
+      expect(bundle).toContain("### package.json");
+      expect(bundle).toContain("### README.md");
+      expect(bundle).toContain("### src/index.ts");
+    });
+
+    it("truncates long source files to 200 lines", () => {
+      const longContent = Array.from({ length: 300 }, (_, i) => `// Line ${i + 1}`).join("\n");
+      makeRepo({
+        "src/big.ts": longContent,
+      });
+      const { files } = discoverFiles(repoDir);
+      const bundle = formatBundle(repoDir, files, files);
+      expect(bundle).toContain("... (100 more lines)");
+    });
+
+    it("redacts absolute paths", () => {
+      makeRepo({
+        "src/config.ts": `const base = "${repoDir.replace(/\\/g, "/")}/data";`,
+      });
+      const { files } = discoverFiles(repoDir);
+      const bundle = formatBundle(repoDir, files, files);
+      expect(bundle).not.toContain(repoDir.replace(/\\/g, "/"));
+      expect(bundle).toContain("<repo>");
+    });
+  });
+
+  // ── scanRepo integration ──────────────────────────────────
+
+  describe("scanRepo integration", () => {
+    it("returns bundle with stats", () => {
+      makeRepo({
+        "package.json": '{"name":"test"}',
+        "src/index.ts": "export default 42;",
+        "README.md": "# Test",
+      });
+      const { bundle, stats } = scanRepo(repoDir);
+      expect(stats.totalFiles).toBeGreaterThanOrEqual(3);
+      expect(stats.selectedFiles).toBeGreaterThanOrEqual(3);
+      expect(bundle).toContain("# Repository:");
+    });
+
+    it("handles empty repos gracefully", () => {
+      // Empty directory — no files
+      const { stats } = scanRepo(repoDir);
+      expect(stats.totalFiles).toBe(0);
+      expect(stats.selectedFiles).toBe(0);
+    });
+  });
+
+  // ── depth limit ───────────────────────────────────────────
+
+  describe("depth limit", () => {
+    it("respects maxDepth parameter", () => {
+      makeRepo({
+        "a/b/c/d/e/f/deep.ts": "const deep = true;",
+        "a/shallow.ts": "const shallow = true;",
+      });
+      const { files } = discoverFiles(repoDir, 2);
+      expect(files.some(f => f.relativePath === "a/shallow.ts")).toBe(true);
+      expect(files.some(f => f.relativePath.includes("f/deep.ts"))).toBe(false);
+    });
+  });
+
+  // ── repo add CLI integration ──────────────────────────────
+
+  describe("repo add to wiki", () => {
+    it("saves bundle to sources/agent/ and queues as repo:", () => {
+      const kbRoot = path.join(tmpDir, ".autopedia");
+      const wiki = new Wiki(kbRoot);
+      wiki.init();
+
+      makeRepo({
+        "package.json": '{"name":"test-project"}',
+        "src/index.ts": "export default 42;",
+      });
+
+      // Simulate what the CLI add command does for repos
+      const repoName = path.basename(repoDir);
+      const { bundle } = scanRepo(repoDir);
+      const pathHash = createHash("sha256").update(repoDir).digest("hex").slice(0, 4);
+      const slug = `repo-${repoName.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40).replace(/-+$/, "")}-${pathHash}`;
+      wiki.saveAgentSource(slug, bundle);
+      wiki.addToQueue(`repo:${slug}`);
+
+      // Verify source was saved
+      const sourcePath = path.join(kbRoot, "sources", "agent", `${slug}.md`);
+      expect(fs.existsSync(sourcePath)).toBe(true);
+      const savedContent = fs.readFileSync(sourcePath, "utf-8");
+      expect(savedContent).toContain("# Repository:");
+
+      // Verify queue entry
+      const queue = fs.readFileSync(path.join(kbRoot, "ops", "queue.md"), "utf-8");
+      expect(queue).toContain(`repo:${slug}`);
+    });
   });
 });

@@ -301,9 +301,10 @@ export class Wiki {
       .split("\n")
       .filter((line) => {
         const entry = line.replace(/^- \[[ x]\] /, "").trim();
-        // Match exact entry, note:slug, file:slug, or slug with extension
+        // Match exact entry, note:slug, file:slug, repo:slug, or slug with extension
         return entry !== slug && entry !== baseSlug
-          && entry !== `note:${baseSlug}` && entry !== `file:${slug}` && entry !== `file:${baseSlug}`;
+          && entry !== `note:${baseSlug}` && entry !== `file:${slug}` && entry !== `file:${baseSlug}`
+          && entry !== `repo:${baseSlug}` && entry !== `repo:${slug}`;
       })
       .join("\n");
     if (filtered !== content) {
