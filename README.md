@@ -4,6 +4,8 @@
 
 Your AI tool (Claude Code, Cursor, etc.) maintains a [Karpathy-style wiki](https://x.com/karpathy/status/1908177577476161890) through MCP. No separate LLM client. No API keys. Your existing AI tool IS the brain.
 
+**Requires Node.js 20+**
+
 ## Get started
 
 ### 1. Install
@@ -54,9 +56,16 @@ Add to your AI tool's MCP config (one-time setup):
 }
 ```
 
-### 4. Start using it
+### 4. Verify
 
-On first session, autopedia interviews you (~30 seconds) to personalize your wiki. After that, it's silent until you need it.
+```bash
+autopedia status
+# Should show: Wiki pages: 1, Queued: 0
+```
+
+### 5. Start using it
+
+Start a new Claude Code or Cursor session. On first connection, autopedia interviews you (~30 seconds) to personalize your wiki. After that, it's silent until you need it.
 
 **Add stuff anytime** (from any terminal):
 ```bash
@@ -90,6 +99,7 @@ autopedia never hijacks your conversation. It's a quiet knowledge layer — ther
 | `autopedia add <source>` | Queue a URL, text note, file, folder, or repo |
 | `autopedia add --repo <path>` | Scan a codebase and create an architectural bundle |
 | `autopedia lint` | Check wiki health: orphans, stale pages, broken links |
+| `autopedia remove <name>` | Remove a wiki page (or source with `-s`) |
 | `autopedia scan` | Detect files added outside autopedia (Obsidian, IDE) and queue them |
 | `autopedia status` | Show wiki stats and unprocessed sources |
 | `autopedia search <query>` | Search wiki pages from the terminal |
@@ -168,9 +178,10 @@ Implements [Karpathy's three wiki operations](https://x.com/karpathy/status/1908
 ## Architecture
 
 ```
-src/wiki.ts      — File I/O, boundary enforcement, wikilink graph, scan
+src/wiki.ts      — File I/O, boundary enforcement, wikilink graph, lint, scan
 src/mcp.ts       — 9 MCP tools + 3 resources
-src/cli.ts       — CLI: init, add, scan, serve, status, view, search, export
+src/cli.ts       — CLI: init, add, lint, scan, serve, status, view, search, export, remove
+                   Repo scanner: smart file discovery, role scoring, bundle formatting
 src/dashboard.ts — Server-rendered HTML dashboard (graph, backlinks, source titles)
 schema/prompt.md — System prompt (served via MCP, auto-updates on upgrade)
 ```
@@ -184,7 +195,7 @@ git clone https://github.com/devp1/autopedia
 cd autopedia
 npm install
 npm run build
-npm test          # 215 tests
+npm test          # 259 tests
 npm run typecheck
 npm run lint
 ```
