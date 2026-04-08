@@ -75,7 +75,7 @@ export function createServer(kbRoot: string): McpServer {
                 type: "text" as const,
                 text: JSON.stringify({
                   queued: input.url,
-                  message: "Saved to queue. Will be processed next session or when you say 'process queue'.",
+                  message: "Saved to queue. Say 'sync' to process.",
                 }),
               },
             ],

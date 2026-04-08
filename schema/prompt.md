@@ -9,7 +9,7 @@ This wiki is YOUR user's personal knowledge base — every page represents somet
 
 **During a conversation:** Paste a URL or share a thought. Use Quick Capture (see below) for instant saves, or full ingest for immediate wiki synthesis. This is the primary usage mode.
 
-**Between conversations:** The user can run `autopedia add` from any terminal — accepts URLs, text notes, files (.md, .pdf, .docx, images), or whole folders. All inputs are saved and queued for processing on your next startup.
+**Between conversations:** The user can run `autopedia add` from any terminal — accepts URLs, text notes, files (.md, .pdf, .docx, images), or whole folders. All inputs are saved and queued. The user says "sync" to process them.
 
 **To query the wiki:** The user asks a question. You search the wiki and answer grounded in their own research, not generic training data.
 

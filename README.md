@@ -104,7 +104,7 @@ autopedia add ~/research/gpu-report.pdf                  # file
 autopedia add ~/research/                                # whole folder
 ```
 
-Everything is queued and processed the next time your AI tool connects.
+Everything is saved instantly. Tell your AI tool "sync" to process.
 
 ## Dashboard
 
@@ -121,7 +121,7 @@ Run `autopedia view` to open a local dashboard.
 
 Open `~/.autopedia/` as an Obsidian vault. Wikilinks, graph view, and backlinks work out of the box.
 
-**Drag-and-drop workflow**: Drop files into the vault via Obsidian, then run `autopedia scan` to queue them for AI processing. Or let the AI detect them automatically via `get_status`.
+**Drag-and-drop workflow**: Drop files into the vault via Obsidian, then run `autopedia scan` to queue them. Tell your AI tool "sync" to process.
 
 ## How it works
 

@@ -751,7 +751,7 @@ function handleIndex(wiki: Wiki, kbRoot: string): string {
         <pre><code>autopedia add "your thought here"
 autopedia add https://example.com/article
 autopedia add ~/research/notes.md</code></pre>
-        <p>Then connect your AI tool — it will process your queue and build wiki pages automatically.</p>
+        <p>Then tell your AI tool <strong>"sync my wiki"</strong> to process everything into wiki pages.</p>
       </div>`;
     return renderPage("Wiki", gettingStarted, sidebar);
   }

@@ -198,7 +198,7 @@ export function createCli(): Command {
       }
 
       console.log(
-        "  Will be processed next time your AI tool connects to autopedia."
+        "  Tell your AI tool 'sync' to process."
       );
     });
 

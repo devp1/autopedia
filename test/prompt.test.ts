@@ -131,9 +131,9 @@ describe("System prompt quality", () => {
       expect(promptContent).toContain("interests.md");
     });
 
-    it("documents startup behavior", () => {
+    it("documents on-demand queue processing", () => {
       expect(promptContent).toContain("get_status");
-      expect(promptContent).toMatch(/startup|first connected/i);
+      expect(promptContent).toMatch(/sync|process/i);
     });
   });
 
