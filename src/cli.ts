@@ -216,6 +216,24 @@ export function discoverFiles(repoPath: string, maxDepth = 5): { files: ScoredFi
   const results: ScoredFile[] = [];
   let skipped = 0;
 
+  // Build gitignore set: files that git would ignore (if this is a git repo)
+  let gitIgnored: Set<string> | null = null;
+  if (fs.existsSync(path.join(repoPath, ".git"))) {
+    try {
+      // Get all tracked + untracked-but-not-ignored files
+      const tracked = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], {
+        cwd: repoPath, stdio: ["pipe", "pipe", "pipe"], timeout: 10000,
+      }).toString().trim().split("\n").filter(Boolean);
+      gitIgnored = new Set<string>();
+      // We'll use this as an allowlist — only include files git knows about
+      for (const f of tracked) {
+        gitIgnored.add(f.replace(/\\/g, "/"));
+      }
+    } catch {
+      gitIgnored = null; // Fall back to static exclusion
+    }
+  }
+
   function walk(dir: string, depth: number): void {
     if (depth > maxDepth) return;
 
@@ -254,6 +272,10 @@ export function discoverFiles(repoPath: string, maxDepth = 5): { files: ScoredFi
       if (stat.size > 1024 * 1024) continue;
 
       const relativePath = path.relative(repoPath, fullPath).replace(/\\/g, "/");
+
+      // Skip gitignored files (if we have git data)
+      if (gitIgnored && !gitIgnored.has(relativePath)) continue;
+
       const { role, score } = classifyFile(relativePath, stat.size);
 
       if (role === "generated") continue;
@@ -519,10 +541,14 @@ export function formatBundle(repoPath: string, allFiles: ScoredFile[], selected:
       const safe = redactAbsolutePaths(displayContent, repoPath);
 
       const ext = path.extname(f.relativePath).replace(".", "");
+      // Use a fence that won't collide with content's own fences
+      // Find the longest run of backticks in content and use one longer
+      const maxTicks = (safe.match(/`{3,}/g) || []).reduce((max, m) => Math.max(max, m.length), 2);
+      const fence = "`".repeat(maxTicks + 1);
       sections.push(`### ${f.relativePath} (${f.role}, ${f.lineCount} lines)\n`);
-      sections.push("```" + ext);
+      sections.push(fence + ext);
       sections.push(safe);
-      sections.push("```\n");
+      sections.push(fence + "\n");
     }
   }
 

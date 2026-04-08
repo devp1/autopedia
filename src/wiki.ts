@@ -416,6 +416,8 @@ export class Wiki {
     const line = `- [ ] ${entry}`;
     if (fs.existsSync(queuePath)) {
       const existing = fs.readFileSync(queuePath, "utf-8");
+      // Skip if already queued (unprocessed) — prevents duplicates on re-scan
+      if (existing.includes(line)) return;
       this.safeWrite("ops/queue.md", existing + "\n" + line);
     } else {
       this.safeWrite("ops/queue.md", `# Source Queue\n${line}`);
