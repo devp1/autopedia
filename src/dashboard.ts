@@ -498,6 +498,10 @@ body {
 .graph-content { max-width: none; }
 .graph-container { width: 100%; height: calc(100vh - 120px); }
 .graph-container svg { width: 100%; height: 100%; }
+.graph-label { fill: var(--text); }
+.graph-edge { stroke: var(--border); stroke-width: 1.5; }
+.graph-node { fill: var(--text-secondary); }
+.graph-node-index { fill: var(--accent); }
 
 /* ── Backlinks ─────────────────────────── */
 
@@ -911,8 +915,7 @@ function handleGraph(wiki: Wiki, kbRoot: string): string {
   var ns = 'http://www.w3.org/2000/svg';
   var edgeEls = edges.map(function(e) {
     var el = document.createElementNS(ns, 'line');
-    el.setAttribute('stroke', getComputedStyle(document.documentElement).getPropertyValue('--border').trim());
-    el.setAttribute('stroke-width', '1.5');
+    el.setAttribute('class', 'graph-edge');
     svg.appendChild(el);
     return el;
   });
@@ -921,16 +924,13 @@ function handleGraph(wiki: Wiki, kbRoot: string): string {
     g.style.cursor = 'pointer';
     var circle = document.createElementNS(ns, 'circle');
     var r = n.id === 'index' ? 12 : 8;
-    var fill = n.id === 'index'
-      ? getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()
-      : getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim();
     circle.setAttribute('r', r);
-    circle.setAttribute('fill', fill);
+    circle.setAttribute('class', n.id === 'index' ? 'graph-node-index' : 'graph-node');
     var label = document.createElementNS(ns, 'text');
     label.textContent = n.id;
     label.setAttribute('dy', -r - 4);
     label.setAttribute('text-anchor', 'middle');
-    label.setAttribute('fill', getComputedStyle(document.documentElement).getPropertyValue('--text').trim());
+    label.setAttribute('class', 'graph-label');
     label.setAttribute('font-size', '12');
     label.setAttribute('font-family', getComputedStyle(document.documentElement).getPropertyValue('--font-body').trim());
     g.appendChild(circle);

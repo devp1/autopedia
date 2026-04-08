@@ -108,6 +108,57 @@ describe("CLI: autopedia init", () => {
     });
   });
 
+  // ── init guard (project directory detection) ───────────────
+
+  describe("init guard", () => {
+    it("rejects init --dir inside a git repo", async () => {
+      const projectDir = path.join(tmpDir, "myrepo");
+      fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
+
+      const { createCli } = await import("../src/cli.js");
+      const program = createCli();
+      program.exitOverride();
+
+      const exitSpy = (await import("vitest")).vi.spyOn(process, "exit").mockImplementation((() => {
+        throw new Error("process.exit called");
+      }) as never);
+      const stderrSpy = (await import("vitest")).vi.spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await expect(program.parseAsync(["node", "test", "init", "--dir", projectDir])).rejects.toThrow();
+        expect(exitSpy).toHaveBeenCalledWith(1);
+        expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining("code project"));
+      } finally {
+        exitSpy.mockRestore();
+        stderrSpy.mockRestore();
+      }
+    });
+
+    it("rejects init --dir inside nested subdirectory of a git repo", async () => {
+      const projectDir = path.join(tmpDir, "myrepo2");
+      fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
+      const subDir = path.join(projectDir, "docs", "notes");
+      fs.mkdirSync(subDir, { recursive: true });
+
+      const { createCli } = await import("../src/cli.js");
+      const program = createCli();
+      program.exitOverride();
+
+      const exitSpy = (await import("vitest")).vi.spyOn(process, "exit").mockImplementation((() => {
+        throw new Error("process.exit called");
+      }) as never);
+      const stderrSpy = (await import("vitest")).vi.spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await expect(program.parseAsync(["node", "test", "init", "--dir", subDir])).rejects.toThrow();
+        expect(exitSpy).toHaveBeenCalledWith(1);
+      } finally {
+        exitSpy.mockRestore();
+        stderrSpy.mockRestore();
+      }
+    });
+  });
+
   // ── add (text) ──────────────────────────────────────────────
 
   describe("add operation (text)", () => {

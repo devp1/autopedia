@@ -94,7 +94,7 @@ function addFileToWiki(wiki: Wiki, filePath: string, date: string, ts: string, i
 const EXCLUDED_DIRS = new Set([
   "node_modules", ".git", "dist", "build", ".next", "__pycache__",
   ".venv", "venv", "target", ".cache", "coverage", ".turbo", ".vercel",
-  ".output", ".nuxt", ".svelte-kit", ".parcel-cache",
+  ".output", ".nuxt", ".svelte-kit", ".parcel-cache", ".autopedia",
 ]);
 
 const EXCLUDED_FILE_PATTERNS = [
@@ -603,8 +603,28 @@ export function createCli(): Command {
     .option("-d, --dir <path>", "Parent directory for .autopedia/ (default: ~/)")
     .action(async (opts: { dir?: string }) => {
       const kbRoot = opts.dir
-        ? path.resolve(opts.dir, ".autopedia")
+        ? (path.resolve(opts.dir).endsWith(".autopedia")
+          ? path.resolve(opts.dir)
+          : path.resolve(opts.dir, ".autopedia"))
         : path.join(os.homedir(), ".autopedia");
+
+      // Guard: prevent creating .autopedia/ inside a code project
+      // Walk up from the target dir to root, checking each ancestor
+      if (opts.dir) {
+        const projectSignals = [".git", "package.json", "Cargo.toml", "pyproject.toml", "go.mod", "pom.xml"];
+        let checkDir = path.resolve(opts.dir);
+        const home = os.homedir();
+        while (checkDir !== path.dirname(checkDir) && checkDir !== home) {
+          const isProject = projectSignals.some(s => fs.existsSync(path.join(checkDir, s)));
+          if (isProject) {
+            console.error("Error: this directory is inside a code project. autopedia should not be initialized inside a project directory.");
+            console.error("  Run `autopedia init` (no --dir) to use the default location ~/");
+            process.exit(1);
+          }
+          checkDir = path.dirname(checkDir);
+        }
+      }
+
       const wiki = new Wiki(kbRoot);
       wiki.init();
 
